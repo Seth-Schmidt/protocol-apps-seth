@@ -1,0 +1,14 @@
+name: "Bug Issue"
+description: File any issue related to bugs
+title: "bug: short description"
+projects: ["zama-ai/35"] # blokchain division project
+type: bug
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the issue
+      description: |
+        Please describe the issue in detail.
+    validations:
+      required: true

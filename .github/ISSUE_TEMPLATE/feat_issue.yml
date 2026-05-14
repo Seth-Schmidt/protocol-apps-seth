@@ -1,0 +1,14 @@
+name: "Feature Issue"
+description: File any issue related to features
+title: "feat: short description"
+projects: ["zama-ai/35"] # blokchain division project
+type: feat
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the issue
+      description: |
+        Please describe the issue in detail.
+    validations:
+      required: true

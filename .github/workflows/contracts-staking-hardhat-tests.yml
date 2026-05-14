@@ -1,0 +1,50 @@
+# Run tests
+name: contracts-staking-tests
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/contracts-staking-hardhat-tests.yml'
+      - 'contracts/staking/**'
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ci-contracts-staking-tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  tests:
+    name: contracts-staking-tests/tests (bpr)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read' # Required to checkout repository code
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: 'false'
+
+      - name: Install dependencies
+        working-directory: contracts/staking
+        run: npm ci
+
+      - name: Run lint
+        working-directory: contracts/staking
+        run: npm run lint
+
+      - name: Run compile
+        working-directory: contracts/staking
+        run: npm run compile
+
+      - name: Run unit tests
+        working-directory: contracts/staking
+        run: make test
+
+      - name: Run tasks tests
+        working-directory: contracts/staking
+        run: make test-tasks
