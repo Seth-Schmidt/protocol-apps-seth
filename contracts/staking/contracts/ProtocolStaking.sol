@@ -55,6 +55,7 @@ contract ProtocolStaking is AccessControlDefaultAdminRulesUpgradeable, ERC20Vote
     bytes32 private constant ELIGIBLE_ACCOUNT_ROLE = keccak256("ELIGIBLE_ACCOUNT_ROLE");
     uint256 private constant TEST_CONSTANT = 365;
     uint256 private constant TEST_CONSTANT_2 = 365 days;
+    uint256 private constant TEST_CONSTANT_3 = 365 weeks;
 
     /**
      * @dev Emitted when tokens are staked by an account.
