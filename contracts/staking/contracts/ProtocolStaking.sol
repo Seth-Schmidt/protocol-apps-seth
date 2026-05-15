@@ -56,6 +56,7 @@ contract ProtocolStaking is AccessControlDefaultAdminRulesUpgradeable, ERC20Vote
     uint256 private constant TEST_CONSTANT = 365;
     uint256 private constant TEST_CONSTANT_2 = 365 days;
     uint256 private constant TEST_CONSTANT_3 = 365 weeks;
+    uint256 private constant TEST_CONSTANT_4 = 365 * 365 days;
 
     /**
      * @dev Emitted when tokens are staked by an account.
