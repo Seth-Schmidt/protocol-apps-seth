@@ -1,0 +1,38 @@
+name: Security fuzz gate
+
+# Dispatches the private fuzz suite on every PR and gates on the
+# security/fuzzing commit status posted by the private repo.
+# Non-contract PRs receive an immediate success status from the private
+# repo's diff routing step and are unblocked in seconds.
+#
+# Requires SECURITY_DISPATCH_TOKEN secret: fine-grained PAT with actions:write
+# on protocol-apps-security-seth.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Fuzz gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Dispatch fuzz suite
+        env:
+          GH_TOKEN: ${{ secrets.SECURITY_DISPATCH_TOKEN }}
+        run: |
+          gh api --method POST repos/Seth-Schmidt/protocol-apps-security-seth/dispatches \
+            --input - <<EOF
+          {
+            "event_type": "pr-fuzz",
+            "client_payload": {
+              "commit_sha": "${{ github.event.pull_request.head.sha }}",
+              "pr_number": "${{ github.event.pull_request.number }}"
+            }
+          }
+          EOF
