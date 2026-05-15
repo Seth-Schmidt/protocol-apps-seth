@@ -30,6 +30,7 @@ jobs:
       - name: Check for contract changes
         id: files
         env:
+          GH_TOKEN: ${{ github.token }}
           COMMIT: ${{ github.event.pull_request.head.sha }}
           PR: ${{ github.event.pull_request.number }}
         run: |
@@ -65,6 +66,7 @@ jobs:
       - name: Post success for non-contract PRs
         if: steps.files.outputs.has_contracts == 'false'
         env:
+          GH_TOKEN: ${{ github.token }}
           COMMIT: ${{ github.event.pull_request.head.sha }}
         run: |
           gh api --method POST \
@@ -76,6 +78,7 @@ jobs:
       - name: Post pending status
         if: steps.files.outputs.has_contracts == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           COMMIT: ${{ github.event.pull_request.head.sha }}
         run: |
           gh api --method POST \
@@ -88,6 +91,7 @@ jobs:
       - name: Dispatch private fuzz runner
         if: steps.files.outputs.has_contracts == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           COMMIT: ${{ github.event.pull_request.head.sha }}
           PR: ${{ github.event.pull_request.number }}
         run: |
