@@ -59,7 +59,7 @@ jobs:
             exit 1
           fi
 
-          if printf '%s\n' "$changed" | grep -q '^contracts/'; then
+          if printf '%s\n' "$changed" | grep -qE '^contracts/.*\.sol$'; then
             echo "has_contracts=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_contracts=false" >> "$GITHUB_OUTPUT"
