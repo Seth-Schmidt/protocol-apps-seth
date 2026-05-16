@@ -65,7 +65,7 @@ jobs:
             echo "has_contracts=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Post success for non-contract PRs
+      - name: Post success — no fuzz suites triggered
         if: steps.files.outputs.has_contracts == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
