@@ -32,6 +32,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           COMMIT: ${{ github.event.pull_request.head.sha }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
 
@@ -44,13 +45,10 @@ jobs:
               -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           }
 
-          BASE_SHA=${{ github.event.pull_request.base.sha }}
-          HEAD_SHA=${{ github.event.pull_request.head.sha }}
-
           set +e
-          changed=$(gh api \
-            "repos/${{ github.repository }}/compare/$BASE_SHA...$HEAD_SHA" \
-            --jq '.files[].filename')
+          changed=$(gh api --paginate \
+            "repos/${{ github.repository }}/pulls/$PR/files" \
+            --jq '.[].filename')
           api_rc=$?
           set -e
 
@@ -59,7 +57,7 @@ jobs:
             exit 1
           fi
 
-          if printf '%s\n' "$changed" | grep -qE '^contracts/.*\.sol$'; then
+          if printf '%s\n' "$changed" | grep -q '^contracts/'; then
             echo "has_contracts=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_contracts=false" >> "$GITHUB_OUTPUT"
