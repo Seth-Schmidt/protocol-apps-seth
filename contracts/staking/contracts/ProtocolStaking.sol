@@ -278,6 +278,8 @@ contract ProtocolStaking is AccessControlDefaultAdminRulesUpgradeable, ERC20Vote
         return SafeCast.toUint256(SignedMath.max(0, SafeCast.toInt256(allocation) - $._paid[account]));
     }
 
+    // testtttt
+
     /**
      * @dev Returns the staking token which is used for staking and rewards.
      * @return The address of the staking token.
