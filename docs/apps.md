@@ -2,6 +2,8 @@
 
 This page lists the official Zama Protocol web applications.
 
+test
+
 | Application | Description |
 | --- | --- |
 | [Staking](https://staking.zama.org/) | Stake ZAMA tokens and manage your staking positions |
