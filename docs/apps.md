@@ -1,5 +1,7 @@
 # Apps
 
+test
+
 This page lists the official Zama Protocol web applications.
 
 | Application | Description |
