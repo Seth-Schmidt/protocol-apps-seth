@@ -279,7 +279,7 @@ contract ProtocolStaking is AccessControlDefaultAdminRulesUpgradeable, ERC20Vote
     }
 
     /**
-     * @dev Returns the staking token which is used for staking and rewards.
+     * @dev Returns the staking token which is used for staking and rewards. test
      * @return The address of the staking token.
      */
     function stakingToken() public view virtual returns (address) {
