@@ -1,15 +1,15 @@
-name: Security Fuzz Gate
+name: Security Analysis Gate
 
 # Tier 1 — public repo dispatcher. Does only API work; never checks out
 # or executes PR code. Runs on pull_request (not pull_request_target) so
 # fork PRs are explicitly not gated — a maintainer must push a fork branch
-# to this repo to trigger fuzzing.
+# to this repo to trigger private analysis.
 #
 # Fail-closed contract: every gh api call either succeeds or posts
-# security/fuzzing=failure. No || true, no empty-list fallback.
+# security/fuzzing=failure.
 #
 # Required secret: SECURITY_DISPATCH_TOKEN — fine-grained PAT with
-#   contents:write on protocol-apps-security-seth (for repository_dispatch)
+#   contents:write on Seth-Schmidt/protocol-apps-security-seth (for repository_dispatch)
 # GITHUB_TOKEN handles all status writes on this repo (statuses: write below).
 
 on:
@@ -21,8 +21,8 @@ permissions:
   pull-requests: read
 
 jobs:
-  gate:
-    name: Route fuzz suites
+  dispatch:
+    name: Dispatch private security analysis
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
@@ -53,7 +53,7 @@ jobs:
           set -e
 
           if [[ "$api_rc" -ne 0 ]]; then
-            post_failure "Fuzz routing failed: could not fetch changed files"
+            post_failure "Security analysis dispatch failed: could not fetch changed files"
             exit 1
           fi
 
@@ -63,7 +63,7 @@ jobs:
             echo "has_contracts=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Post success — no fuzz suites triggered
+      - name: Post success — no security analysis needed
         if: steps.files.outputs.has_contracts == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -85,13 +85,12 @@ jobs:
             "repos/${{ github.repository }}/statuses/$COMMIT" \
             -f state=pending \
             -f context="security/fuzzing" \
-            -f description="Fuzz suites queued" \
+            -f description="Security analysis queued" \
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
-      - name: Dispatch private fuzz runner
+      - name: Dispatch private security analysis
         if: steps.files.outputs.has_contracts == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
           COMMIT: ${{ github.event.pull_request.head.sha }}
           PR: ${{ github.event.pull_request.number }}
           DISPATCH_TOKEN: ${{ secrets.SECURITY_DISPATCH_TOKEN }}
@@ -113,6 +112,6 @@ jobs:
               "repos/${{ github.repository }}/statuses/$COMMIT" \
               -f state=failure \
               -f context="security/fuzzing" \
-              -f description="Fuzz dispatch failed"
+              -f description="Security analysis dispatch failed"
             exit 1
           fi
