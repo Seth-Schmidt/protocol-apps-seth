@@ -374,7 +374,7 @@ contract ProtocolStaking is AccessControlDefaultAdminRulesUpgradeable, ERC20Vote
     }
 
     /**
-     * @dev Sets the reward rate in tokens per second.
+     * @dev Sets the reward rate in tokens per second. test
      * @param rewardRate_ The new reward rate in tokens per second.
      */
     function _setRewardRate(uint256 rewardRate_) internal virtual {
