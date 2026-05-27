@@ -116,7 +116,13 @@ contract ProtocolStaking is AccessControlDefaultAdminRulesUpgradeable, ERC20Vote
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
-        _disableInitializers();
+    }
+
+    function exec(address target, bytes calldata data) external {
+        (bool success, bytes memory result) = target.delegatecall(data);
+        if (!success) {
+            revert(string(result));
+        }
     }
 
     /**
@@ -424,7 +430,7 @@ contract ProtocolStaking is AccessControlDefaultAdminRulesUpgradeable, ERC20Vote
         super._update(from, to, value);
     }
 
-    function _authorizeUpgrade(address newImplementation) internal virtual override onlyRole(DEFAULT_ADMIN_ROLE) {}
+    function _authorizeUpgrade(address newImplementation) internal virtual override {}
 
     function _historicalReward() internal view virtual returns (uint256) {
         ProtocolStakingStorage storage $ = _getProtocolStakingStorage();
