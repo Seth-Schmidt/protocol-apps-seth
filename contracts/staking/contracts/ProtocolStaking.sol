@@ -424,7 +424,7 @@ contract ProtocolStaking is AccessControlDefaultAdminRulesUpgradeable, ERC20Vote
         super._update(from, to, value);
     }
 
-    function _authorizeUpgrade(address newImplementation) internal virtual override onlyRole(DEFAULT_ADMIN_ROLE) {}
+    function _authorizeUpgrade(address newImplementation) internal virtual override {}
 
     function _historicalReward() internal view virtual returns (uint256) {
         ProtocolStakingStorage storage $ = _getProtocolStakingStorage();
