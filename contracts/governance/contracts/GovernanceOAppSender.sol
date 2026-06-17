@@ -10,7 +10,7 @@ import { Operation } from "./shared/Structs.sol";
 contract GovernanceOAppSender is OAppSender, OAppOptionsType3 {
     /// @notice Msg type for sending data, for use in OAppOptionsType3 as an enforced option.
     uint16 public constant SEND = 1;
-    uint32 public immutable DESTINATION_EID; /// @dev 40424 for Zama testnet, and ??? for mainnet.
+    uint32 public immutable DESTINATION_EID;
 
     /// @notice This struct is used to avoid stack too deep errors
     struct MessagingReceiptOptions {
@@ -24,8 +24,6 @@ contract GovernanceOAppSender is OAppSender, OAppOptionsType3 {
     error InsufficientBalanceForFee();
     /// @notice Thrown when recipient is the null address.
     error InvalidNullRecipient();
-    /// @notice Thrown when trying to deploy this contract on an unsupported blockchain.
-    error UnsupportedChainID();
 
     /// @notice Thrown when targets array is empty.
     error TargetsIsEmpty();
@@ -38,7 +36,7 @@ contract GovernanceOAppSender is OAppSender, OAppOptionsType3 {
     /// @notice Thrown when length of targets array is different than length of functionSignatures array.
     error TargetsNotSameLengthAsFunctionSignatures();
 
-    /// @notice Emitted when a proposal has been successfully sent to Zama Gateway chain.
+    /// @notice Emitted when a proposal has been successfully sent to destination chain.
     event RemoteProposalSent(
         address[] targets,
         uint256[] values,
@@ -53,17 +51,8 @@ contract GovernanceOAppSender is OAppSender, OAppOptionsType3 {
     /// @notice Initialize with Endpoint V2 and owner address.
     /// @param endpoint The local chain's LayerZero Endpoint V2 address.
     /// @param owner    The address permitted to configure this OApp.
-    constructor(address endpoint, address owner) OAppCore(endpoint, owner) Ownable(owner) {
-        uint256 chainID = block.chainid;
-        if (chainID == 1) {
-            // chainID of ethereum-mainnet i.e linked to gateway-mainnet.
-            DESTINATION_EID = 30397;
-        } else if (chainID == 11155111) {
-            // chainID of ethereum-testnet i.e linked to gateway-testnet.
-            DESTINATION_EID = 40424;
-        } else {
-            revert UnsupportedChainID();
-        }
+    constructor(address endpoint, address owner, uint32 dstEid) OAppCore(endpoint, owner) Ownable(owner) {
+        DESTINATION_EID = dstEid;
     }
 
     /// @notice Quotes the gas needed to pay for the full cross-chain transaction in native gas.
@@ -92,7 +81,7 @@ contract GovernanceOAppSender is OAppSender, OAppOptionsType3 {
         fee = mfee.nativeFee;
     }
 
-    /// @notice Send a cross-chain proposal to Zama Gateway chain. Only the owner, i.e the Aragon DAO, should be able to send proposals.
+    /// @notice Send a cross-chain proposal to destination chain. Only the owner, i.e the Aragon DAO, should be able to send proposals.
     /// @notice The default LayerZero executor caps payload size at 10000 bytes. Proposals with many batched calls or large calldata can
     /// exceed this limit and cause `_lzSend` to revert on the source chain.
     /// @param targets The target contracts to be called.
