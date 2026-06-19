@@ -40,17 +40,24 @@ Currently, most useful scripts are:
 #### Usage
 
 ```bash
+# Mainnet (default): Ethereum, Gateway, Polygon
 npm run get-current-pausers
+
+# Testnet: Sepolia, Gateway Testnet, Polygon Amoy
+npm run get-current-pausers:testnet
+# equivalent to: npm run get-current-pausers -- --testnet
 ```
 
-Returns the current set of active pausers for PauserSet contracts on Ethereum and Gateway chains by analyzing on-chain events.
+Returns the current set of active pausers for PauserSet contracts on the configured chains by analyzing on-chain events. Pass `--mainnet` (the default) or `--testnet` to choose the network.
+
+A chain is queried only when both its RPC and `PAUSER_SET` env vars are set, so the script works with any subset of the supported chains. Each network reads its own env vars (e.g. `RPC_ETHEREUM`/`PAUSER_SET_ETHEREUM` for mainnet, `RPC_SEPOLIA`/`PAUSER_SET_SEPOLIA` for testnet) — see `.env.example`.
 
 The script will:
-1. Query both Ethereum and Gateway chains (if configured)
+1. Query every configured chain (any of Ethereum, Gateway, Polygon)
 2. Find the deployment block for each PauserSet contract
 3. Fetch all `AddPauser`, `RemovePauser`, and `SwapPauser` events
 4. Compute the current set of active pausers
-5. Display a summary comparing pausers across chains
+5. Display a summary comparing pausers across all configured chains
 
 #### Example Output
 
@@ -88,10 +95,17 @@ Gateway pausers:
   Total: 2 pauser(s)
 
 --------------------------------------------------
-Pausers are IDENTICAL on both chains.
+Pausers are IDENTICAL across all 2 configured chains.
 ```
 
-If pausers differ between chains, the script will show which addresses exist only on one chain.
+If pausers differ between chains, the script lists each mismatched address with the chains it is present on and the chains it is missing from.
+
+#### Deployment-block detection / archive nodes
+
+By default the script binary-searches for each PauserSet's deployment block using `eth_getCode` at historical blocks, which requires an **archive node**. Many free/public RPCs (notably most Sepolia endpoints) are pruned and either error or return `0x` for old blocks. To avoid this:
+
+- **Pin the deployment block** via the matching `*_FROM_BLOCK` env var (e.g. `PAUSER_SET_SEPOLIA_FROM_BLOCK`). Look the contract-creation block up once on the explorer. This skips detection entirely — fastest and most reliable.
+- Otherwise, if detection fails the script **falls back to scanning events from block 0** (`eth_getLogs` is served from genesis even by pruned nodes — slower but works).
 
 ### getTokenRoles
 
