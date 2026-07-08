@@ -62,3 +62,11 @@ jobs:
       - name: Run unit tests
         working-directory: contracts/feesBurner
         run: npx hardhat test
+
+      - name: Run coverage
+        working-directory: contracts/feesBurner
+        run: npm run coverage
+
+      - name: Check coverage thresholds (core contracts only)
+        working-directory: contracts/feesBurner
+        run: npm run coverage:check
