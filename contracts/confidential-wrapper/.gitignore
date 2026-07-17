@@ -47,3 +47,6 @@ broadcast/
 
 # Fhevm
 fhevmTemp/
+
+# Generated deploy report (uploaded as a CI artifact, never committed)
+deploy-log.json
