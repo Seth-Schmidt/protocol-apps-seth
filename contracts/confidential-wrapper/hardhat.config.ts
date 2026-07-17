@@ -16,6 +16,7 @@ import 'solidity-coverage';
 import 'hardhat-exposed';
 
 import './tasks/accounts';
+import './tasks/ci';
 import './tasks/deploy';
 import './tasks/verify';
 
