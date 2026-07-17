@@ -75,13 +75,10 @@ Pick the option that matches your task:
 
 The standard fresh deploy (proxy + implementation at repo `HEAD`, verify, emit DAO-registration info) can be run from CI instead of a laptop, via the **contracts-confidential-wrapper-deploy** workflow. This keeps the deployer key in a reviewed GitHub Environment and commits deployment state back to the repo.
 
-> ⚠️ Same V4 blocker as the manual path: fresh V3 deploys are blocked until V4 ships. The workflow requires you to type `deploy-fresh` to acknowledge this. The manual runbook below remains valid for exceptional cases.
-
 1. **Add the params file.** Open a PR adding `contracts/confidential-wrapper/deploy-params/<network>/<wrapper>.json` (fields documented in [`deploy-params/README.md`](../../contracts/confidential-wrapper/deploy-params/README.md)). The `owner` **must** be the network DAO — the workflow's preflight hard-fails otherwise. Merge the PR before deploying (the workflow only runs reviewed code on `main`).
 2. **Dispatch the workflow.** From the Actions tab, run **contracts-confidential-wrapper-deploy** with:
    - `network` — `testnet` or `mainnet`
    - `wrapper` — the params-file stem, e.g. `cUSDT` for `deploy-params/<network>/cUSDT.json`
-   - `confirm_fresh_deploy` — type `deploy-fresh`
    - `force_redeploy` — leave `false` unless you intend to deploy a second proxy for a name that already exists
 3. **Approve the environment gate.** The run pauses until a required reviewer for the `<network>-deploy` environment approves. Anyone may dispatch, but nothing runs or spends deployer funds without approval.
 4. **Read the results.** The run summary lists the proxy + implementation addresses, verified Etherscan status, `isConfidentialTokenValid` (expected `false` pre-registration), and the ready-made `registerConfidentialToken(address,address)` calldata for the DAO proposal. Full details are also in the uploaded `deploy-log.json` artifact.

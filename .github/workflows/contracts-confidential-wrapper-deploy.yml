@@ -28,10 +28,6 @@ on:
         description: 'Params file stem under deploy-params/<network>/ (e.g. cTEST -> deploy-params/testnet/cTEST.json)'
         type: string
         required: true
-      confirm_fresh_deploy:
-        description: 'Type "deploy-fresh" to confirm. WARNING: fresh V3 deploys are BLOCKED until V4 ships — see docs/deployment/temp-wrapper-deployment-workaround.md'
-        type: string
-        required: true
       force_redeploy:
         description: 'Deploy a new proxy even if one already exists for this wrapper name'
         type: boolean
@@ -69,16 +65,10 @@ jobs:
       deployed: ${{ steps.deploy.outputs.deployed }}
     steps:
       # --- Guards (before checkout) ---------------------------------------
-      - name: Guard — validate inputs
-        # Inputs are read via env (never interpolated into the script body) to
-        # avoid shell injection before the wrapper value is path-validated.
-        env:
-          CONFIRM: ${{ inputs.confirm_fresh_deploy }}
+      - name: Guard — validate wrapper input
+        # WRAPPER is read via env (never interpolated into the script body) and
+        # path-validated before it is used to build a params-file path.
         run: |
-          if [ "$CONFIRM" != "deploy-fresh" ]; then
-            echo "::error::confirm_fresh_deploy must equal 'deploy-fresh'. Fresh V3 deploys are BLOCKED until V4 ships — see docs/deployment/temp-wrapper-deployment-workaround.md"
-            exit 1
-          fi
           if ! printf '%s' "$WRAPPER" | grep -Eq '^[A-Za-z0-9._-]+$'; then
             echo "::error::wrapper '$WRAPPER' contains invalid characters (allowed: A-Za-z0-9._-)"
             exit 1
