@@ -114,7 +114,8 @@ async function reportImplReuse(hre: HardhatRuntimeEnvironment): Promise<string> 
     const factory = await hre.ethers.getContractFactory(CONTRACT_NAME);
     const bytecode = factory.bytecode;
     const version = getVersion(bytecode, bytecode);
-    const manifest = await Manifest.forNetwork(hre.ethers.provider);
+    // Use the EIP-1193 network provider, matching the OZ upgrades plugin.
+    const manifest = await Manifest.forNetwork(hre.network.provider);
     const data = await manifest.read();
     const existing = data.impls[version.linkedWithoutMetadata];
     if (existing?.address) {
