@@ -71,6 +71,30 @@ Pick the option that matches your task:
 
 > ⚠️ **Do not use as-is.** Fresh V3 deployments are blocked until V4 ships. Follow [`temp-wrapper-deployment-workaround.md`](./temp-wrapper-deployment-workaround.md) instead.
 
+### Deploying via GitHub Actions (recommended)
+
+The standard fresh deploy (proxy + implementation at repo `HEAD`, verify, emit DAO-registration info) can be run from CI instead of a laptop, via the **contracts-confidential-wrapper-deploy** workflow. This keeps the deployer key in a reviewed GitHub Environment and commits deployment state back to the repo.
+
+> ⚠️ Same V4 blocker as the manual path: fresh V3 deploys are blocked until V4 ships. The workflow requires you to type `deploy-fresh` to acknowledge this. The manual runbook below remains valid for exceptional cases.
+
+1. **Add the params file.** Open a PR adding `contracts/confidential-wrapper/deploy-params/<network>/<wrapper>.json` (fields documented in [`deploy-params/README.md`](../../contracts/confidential-wrapper/deploy-params/README.md)). The `owner` **must** be the network DAO — the workflow's preflight hard-fails otherwise. Merge the PR before deploying (the workflow only runs reviewed code on `main`).
+2. **Dispatch the workflow.** From the Actions tab, run **contracts-confidential-wrapper-deploy** with:
+   - `network` — `testnet` or `mainnet`
+   - `wrapper` — the params-file stem, e.g. `cUSDT` for `deploy-params/<network>/cUSDT.json`
+   - `confirm_fresh_deploy` — type `deploy-fresh`
+   - `force_redeploy` — leave `false` unless you intend to deploy a second proxy for a name that already exists
+3. **Approve the environment gate.** The run pauses until a required reviewer for the `<network>-deploy` environment approves. Anyone may dispatch, but nothing runs or spends deployer funds without approval.
+4. **Read the results.** The run summary lists the proxy + implementation addresses, verified Etherscan status, `isConfidentialTokenValid` (expected `false` pre-registration), and the ready-made `registerConfidentialToken(address,address)` calldata for the DAO proposal. Full details are also in the uploaded `deploy-log.json` artifact.
+5. **Merge the state PR.** On a successful deploy the workflow opens a `deploy/wrapper-<network>-<wrapper>-<run_id>` PR committing the `deployments/` artifacts and `.openzeppelin/` manifest. Merge it promptly so the next run starts from committed state (it reuses the implementation from the manifest).
+
+Then continue with **Step 4 (DAO registration)** and **Step 5 (addresses directory)** below — those governance/documentation steps are unchanged.
+
+> **Operator setup (one-time, GitHub admin):** create the `testnet-deploy` / `mainnet-deploy` environments with required reviewers (enable "prevent self-review") and a deployment-branch policy of `main` only; add environment secrets `PRIVATE_KEY` (a dedicated per-network deployer), `RPC_URL`, `ETHERSCAN_API_KEY`; fund the deployer wallets above `minDeployerBalanceWei`; and enable repo Actions setting "Allow GitHub Actions to create and approve pull requests" (the state-PR job needs it).
+
+### Manual deployment
+
+Prefer the GitHub Actions path above. The steps below are the manual equivalent, still valid for exceptional deploys.
+
 ### Step 1 — Set up the environment
 
 From the `contracts/confidential-wrapper` directory:
@@ -189,7 +213,7 @@ Upgrades are a two-phase process: the deployer deploys a new implementation cont
 
 ### Step 1 — Check for an existing implementation
 
-Before deploying, confirm whether a matching implementation for this version already exists. Check:
+Before deploying, confirm whether a matching implementation for this version already exists. Live-network deployment state (`deployments/<network>/` and `.openzeppelin/<network>.json`) is committed to the repo, so these checks work from a fresh clone. Check:
 
 - Existing wrapper deployments may have the implementation that you need already
 - `.openzeppelin/<network>.json` for an entry matching the current source.
