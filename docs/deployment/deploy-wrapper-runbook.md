@@ -71,7 +71,11 @@ Pick the option that matches your task:
 
 > ⚠️ **Do not use as-is.** Fresh V3 deployments are blocked until V4 ships. Follow [`temp-wrapper-deployment-workaround.md`](./temp-wrapper-deployment-workaround.md) instead.
 
-### Deploying via GitHub Actions (recommended)
+### Step 1 — Deploy and verify the wrapper
+
+Pick one path below. Both leave you with a deployed, Etherscan-verified proxy; then continue to **Step 2**.
+
+#### Path A — GitHub Actions (recommended)
 
 The standard fresh deploy (proxy + implementation at repo `HEAD`, verify, emit DAO-registration info) can be run from CI instead of a laptop, via the **contracts-confidential-wrapper-deploy** workflow. This keeps the deployer key in a reviewed GitHub Environment and commits deployment state back to the repo.
 
@@ -84,17 +88,15 @@ The standard fresh deploy (proxy + implementation at repo `HEAD`, verify, emit D
 4. **Read the results.** The run summary lists the proxy + implementation addresses, verified Etherscan status, `isConfidentialTokenValid` (expected `false` pre-registration), and the ready-made `registerConfidentialToken(address,address)` calldata for the DAO proposal. Full details are also in the uploaded `deploy-log.json` artifact.
 5. **Merge the state PR.** On a successful deploy the workflow opens a `deploy/wrapper-<network>-<wrapper>-<run_id>` PR committing the `deployments/` artifacts and `.openzeppelin/` manifest. Merge it promptly so the next run starts from committed state (it reuses the implementation from the manifest).
 
-Then continue with **Step 4 (DAO registration)** and **Step 5 (addresses directory)** below — those governance/documentation steps are unchanged.
+The workflow already verifies the wrapper on Etherscan, so skip Path B and continue to **Step 2** below.
 
 > **Operator setup (one-time, GitHub admin):** create the `testnet-deploy` / `mainnet-deploy` environments with required reviewers (enable "prevent self-review") and a deployment-branch policy of `main` only; add environment secrets `PRIVATE_KEY` (a dedicated per-network deployer), `RPC_URL`, `ETHERSCAN_API_KEY`; fund the deployer wallets above `minDeployerBalanceWei`; and enable repo Actions setting "Allow GitHub Actions to create and approve pull requests" (the state-PR job needs it).
 
-### Manual deployment
+#### Path B — Manual deployment
 
-Prefer the GitHub Actions path above. The steps below are the manual equivalent, still valid for exceptional deploys.
+Prefer Path A above. The steps below are the manual equivalent, still valid for exceptional deploys. Run them from the `contracts/confidential-wrapper` directory.
 
-### Step 1 — Set up the environment
-
-From the `contracts/confidential-wrapper` directory:
+##### Set up the environment
 
 ```bash
 cp .env.example .env
@@ -124,7 +126,7 @@ CONFIDENTIAL_WRAPPER_UNDERLYING_DENY_LIST_SELECTOR_{i}=   # bytes4, e.g. 0xfe575
 CONFIDENTIAL_WRAPPER_HAS_UNDERLYING_DENY_LIST_SELECTOR_{i}=  # true | false
 ```
 
-### Step 2 — Deploy
+##### Deploy
 
 **Batch (recommended when deploying multiple wrappers):**
 
@@ -161,7 +163,7 @@ On success, each wrapper prints:
 
 Record the proxy address for every wrapper.
 
-### Step 3 — Verify on Etherscan
+##### Verify on Etherscan
 
 **Batch:**
 
@@ -179,7 +181,7 @@ npx hardhat task:verifyConfidentialWrapper \
 
 This verifies both the proxy contract and the implementation contract. Since all wrappers share the same implementation bytecode, the implementation source will already be verified from the second wrapper onward. Etherscan will report a duplicate-verification notice, which is expected.
 
-### Step 4 — Register in the Wrappers Registry (DAO action)
+### Step 2 — Register in the Wrappers Registry (DAO action)
 
 The wrapper is not active until the Protocol DAO registers it. This is an onchain governance action and cannot be executed by the deployer.
 
@@ -194,13 +196,10 @@ registry.registerConfidentialToken(
 
 See the [Creating Ethereum Proposals](../governance/creating-proposals-ethereum.md) guide for help on creating a new proposal.
 
-### Step 5 — Update the addresses directory
+### Step 3 — Record addresses
 
-Open a PR on `zama-ai/protocol-apps` with an entry for each new wrapper in the appropriate file in `protocol-apps/docs/addresses/{network}/{chain}` under "Confidential Wrappers":
-
-```markdown
-| Confidential TOKEN | `cTOKEN` | [`0x...`](https://etherscan.io/address/0x...) | [`0x...`](https://etherscan.io/token/0x...) |
-```
+Update the `protocol-registry` repo with the deployed wrapper addresses (proxy +
+underlying ERC-20) for each new wrapper, and ping the repo owners to review and merge.
 
 ---
 

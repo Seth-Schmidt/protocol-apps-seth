@@ -301,15 +301,6 @@ task('task:reportConfidentialWrapper')
     record('underlying', params.underlying, await safeCall('underlying', () => proxy.underlying()));
     record('owner', params.owner, await safeCall('owner', () => proxy.owner()));
 
-    // Registry status — expected false pre-registration.
-    const registry = new ethers.Contract(networkConfig.registry, REGISTRY_ABI, ethers.provider);
-    let registryValid: boolean | string = 'unknown';
-    try {
-      registryValid = await registry.isConfidentialTokenValid(proxyAddress);
-    } catch (err) {
-      summary.push(`- ⚠️ registry.isConfidentialTokenValid reverted: ${(err as Error).message}`);
-    }
-
     // Ready-made DAO registration payload: registerConfidentialToken(underlying, proxy).
     const registrationCalldata = new ethers.Interface(REGISTRY_ABI).encodeFunctionData('registerConfidentialToken', [
       params.underlying,
@@ -319,7 +310,6 @@ task('task:reportConfidentialWrapper')
 
     log.addresses = { proxy: proxyAddress, implementation: implAddress, underlying: params.underlying };
     log.checks = checks;
-    log.registry = { address: networkConfig.registry, isConfidentialTokenValid: registryValid };
     log.registration = { target: networkConfig.registry, calldata: registrationCalldata, cast: castCommand };
 
     summary.push(`- **Proxy:** \`${proxyAddress}\``);
@@ -331,8 +321,6 @@ task('task:reportConfidentialWrapper')
     for (const c of checks) {
       summary.push(`| ${c.name} | \`${c.expected}\` | \`${c.actual}\` | ${c.ok ? '✅' : '❌'} |`);
     }
-    summary.push('');
-    summary.push(`- **Registry \`isConfidentialTokenValid\`:** ${registryValid} (expected \`false\` pre-registration)`);
     summary.push('');
     summary.push('### DAO registration payload');
     summary.push(`Target: \`${networkConfig.registry}\``);

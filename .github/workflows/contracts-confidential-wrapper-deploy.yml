@@ -9,7 +9,7 @@
 #   - PRIVATE_KEY is exposed as step-level env on exactly two steps (resolve
 #     deployer address + deploy) — never job-level, never GITHUB_ENV. Those two
 #     steps are the future DFNS swap points.
-#   - The RPC secret is mapped to SEPOLIA_RPC_URL / MAINNET_RPC_URL per step only.
+#   - Deployment RPC secrets are mapped to SEPOLIA_RPC_URL / MAINNET_RPC_URL per step only.
 #   - The PR-opening job (contents: write) is separate and never sees PRIVATE_KEY.
 name: contracts-confidential-wrapper-deploy
 
@@ -75,12 +75,25 @@ jobs:
           fi
 
       - name: Guard — signer configured
-        # Presence check via the secrets context so PRIVATE_KEY is never exposed
-        # as env on this step.
-        if: ${{ secrets.PRIVATE_KEY == '' || secrets.RPC_URL == '' }}
+        # Presence-check the required secrets. Only booleans (`secret != ''`) reach
+        # the runner, so no secret value — PRIVATE_KEY included — is exposed as env.
+        env:
+          HAS_PRIVATE_KEY: ${{ secrets.PRIVATE_KEY != '' }}
+          HAS_TESTNET_RPC: ${{ secrets.SEPOLIA_DEPLOYMENT_RPC_URL != '' }}
+          HAS_MAINNET_RPC: ${{ secrets.MAINNET_DEPLOYMENT_RPC_URL != '' }}
         run: |
-          echo "::error::refusing to deploy without a signer: set PRIVATE_KEY and RPC_URL in the ${{ inputs.network }}-deploy environment"
-          exit 1
+          if [ "$NETWORK" = "mainnet" ]; then
+            rpc_present="$HAS_MAINNET_RPC"; rpc_secret="MAINNET_DEPLOYMENT_RPC_URL"
+          else
+            rpc_present="$HAS_TESTNET_RPC"; rpc_secret="SEPOLIA_DEPLOYMENT_RPC_URL"
+          fi
+          missing=()
+          [ "$HAS_PRIVATE_KEY" = "true" ] || missing+=("PRIVATE_KEY")
+          [ "$rpc_present" = "true" ] || missing+=("$rpc_secret")
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::refusing to deploy without a signer: set ${missing[*]} in the ${NETWORK}-deploy environment"
+            exit 1
+          fi
 
       # --- Setup (copied from contracts-confidential-wrapper-tests.yml) -----
       # TODO: remove once GitHub runner images ship the CVE-2026-31431 kernel fix
@@ -138,8 +151,8 @@ jobs:
 
       - name: Preflight
         env:
-          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.RPC_URL || '' }}
-          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.RPC_URL || '' }}
+          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.SEPOLIA_DEPLOYMENT_RPC_URL || '' }}
+          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.MAINNET_DEPLOYMENT_RPC_URL || '' }}
           FORCE_REDEPLOY: ${{ inputs.force_redeploy }}
           DEPLOYER_ADDRESS: ${{ steps.signer.outputs.address }}
         run: |
@@ -153,8 +166,8 @@ jobs:
         id: deploy
         env:
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.RPC_URL || '' }}
-          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.RPC_URL || '' }}
+          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.SEPOLIA_DEPLOYMENT_RPC_URL || '' }}
+          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.MAINNET_DEPLOYMENT_RPC_URL || '' }}
         run: |
           npx hardhat task:deployConfidentialWrapperFromParams \
             --params-file "deploy-params/${NETWORK}/${WRAPPER}.json" \
@@ -166,8 +179,8 @@ jobs:
         continue-on-error: true
         env:
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
-          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.RPC_URL || '' }}
-          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.RPC_URL || '' }}
+          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.SEPOLIA_DEPLOYMENT_RPC_URL || '' }}
+          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.MAINNET_DEPLOYMENT_RPC_URL || '' }}
         run: |
           PARAMS_FILE="deploy-params/${NETWORK}/${WRAPPER}.json"
           # Proxy artifact name contains spaces/parens — read it in Node.
@@ -189,8 +202,8 @@ jobs:
         id: postcheck
         continue-on-error: true
         env:
-          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.RPC_URL || '' }}
-          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.RPC_URL || '' }}
+          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.SEPOLIA_DEPLOYMENT_RPC_URL || '' }}
+          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.MAINNET_DEPLOYMENT_RPC_URL || '' }}
         run: |
           npx hardhat task:reportConfidentialWrapper \
             --params-file "deploy-params/${NETWORK}/${WRAPPER}.json" \
@@ -202,8 +215,8 @@ jobs:
         # Only after setup completed — pre-checkout guard failures have no state.
         if: ${{ always() && steps.deps.outcome == 'success' }}
         env:
-          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.RPC_URL || '' }}
-          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.RPC_URL || '' }}
+          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.SEPOLIA_DEPLOYMENT_RPC_URL || '' }}
+          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.MAINNET_DEPLOYMENT_RPC_URL || '' }}
         run: |
           # Ensure a deploy-log + summary exists even when an earlier step failed.
           if [ ! -f deploy-log.json ]; then

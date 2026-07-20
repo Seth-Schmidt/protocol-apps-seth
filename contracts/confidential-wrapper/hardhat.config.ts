@@ -16,8 +16,8 @@ import 'solidity-coverage';
 import 'hardhat-exposed';
 
 import './tasks/accounts';
-import './tasks/ci';
 import './tasks/deploy';
+import './tasks/deploy-pipeline';
 import './tasks/verify';
 
 // Get the environment configuration from .env file
