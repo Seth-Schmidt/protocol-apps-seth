@@ -82,7 +82,7 @@ The standard fresh deploy (proxy + implementation at repo `HEAD`, verify, emit D
 1. **Add the params file.** Open a PR adding `contracts/confidential-wrapper/deploy-params/<network>/<wrapper>.json` (fields documented in [`deploy-params/README.md`](../../contracts/confidential-wrapper/deploy-params/README.md)). The `owner` **must** be the network DAO — the workflow's preflight hard-fails otherwise. Merge the PR before deploying (the workflow only runs reviewed code on `main`).
 2. **Dispatch the workflow.** From the Actions tab, run **contracts-confidential-wrapper-deploy** with:
    - `network` — `testnet` or `mainnet`
-   - `wrapper` — the params-file stem, e.g. `cUSDT` for `deploy-params/<network>/cUSDT.json`
+   - `wrapper` — the token symbol, which must match a params file under `deploy-params/<network>/`, e.g. `cUSDT` for `deploy-params/<network>/cUSDT.json`
    - `force_redeploy` — leave `false` unless you intend to deploy a second proxy for a name that already exists
 3. **Approve the environment gate.** The run pauses until a required reviewer for the `<network>-deploy` environment approves. Anyone may dispatch, but nothing runs or spends deployer funds without approval.
 4. **Read the results.** The run summary lists the proxy + implementation addresses, verified Etherscan status, `isConfidentialTokenValid` (expected `false` pre-registration), and the ready-made `registerConfidentialToken(address,address)` calldata for the DAO proposal. Full details are also in the uploaded `deploy-log.json` artifact.
@@ -90,7 +90,7 @@ The standard fresh deploy (proxy + implementation at repo `HEAD`, verify, emit D
 
 The workflow already verifies the wrapper on Etherscan, so skip Path B and continue to **Step 2** below.
 
-> **Operator setup (one-time, GitHub admin):** create the `testnet-deploy` / `mainnet-deploy` environments with required reviewers (enable "prevent self-review") and a deployment-branch policy of `main` only; add environment secrets `PRIVATE_KEY` (a dedicated per-network deployer), `RPC_URL`, `ETHERSCAN_API_KEY`; fund the deployer wallets above `minDeployerBalanceWei`; and enable repo Actions setting "Allow GitHub Actions to create and approve pull requests" (the state-PR job needs it).
+> **Operator setup (one-time, GitHub admin):** create the `testnet-deploy` / `mainnet-deploy` environments with required reviewers (enable "prevent self-review") and a deployment-branch policy of `main` only; add environment secrets `PRIVATE_KEY` (a dedicated per-network deployer), `SEPOLIA_DEPLOYMENT_RPC_URL` for `testnet-deploy` or `MAINNET_DEPLOYMENT_RPC_URL` for `mainnet-deploy`, and `ETHERSCAN_API_KEY`; fund the deployer wallets above `minDeployerBalanceWei`; and enable repo Actions setting "Allow GitHub Actions to create and approve pull requests" (the state-PR job needs it).
 
 #### Path B — Manual deployment
 
