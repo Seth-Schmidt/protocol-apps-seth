@@ -25,7 +25,7 @@ on:
         default: testnet
         required: true
       wrapper:
-        description: 'Params file stem under deploy-params/<network>/ (e.g. cTEST -> deploy-params/testnet/cTEST.json)'
+        description: 'Token symbol, which must match a params file under deploy-params/<network>/. Enter cTEST for the file deploy-params/<network>/cTEST.json'
         type: string
         required: true
       force_redeploy:
@@ -68,15 +68,20 @@ jobs:
       - name: Guard — validate wrapper input
         # WRAPPER is read via env (never interpolated into the script body) and
         # path-validated before it is used to build a params-file path.
+        # Runs before checkout, so override the job's default working-directory
+        # (contracts/confidential-wrapper doesn't exist on the runner yet).
+        working-directory: ${{ github.workspace }}
         run: |
           if ! printf '%s' "$WRAPPER" | grep -Eq '^[A-Za-z0-9._-]+$'; then
-            echo "::error::wrapper '$WRAPPER' contains invalid characters (allowed: A-Za-z0-9._-)"
+            echo "::error::wrapper '$WRAPPER' contains invalid characters (allowed: A-Za-z0-9._-). Enter the token symbol only, e.g. cTEST"
             exit 1
           fi
 
       - name: Guard — signer configured
         # Presence-check the required secrets. Only booleans (`secret != ''`) reach
         # the runner, so no secret value — PRIVATE_KEY included — is exposed as env.
+        # Runs before checkout — override the job's default working-directory.
+        working-directory: ${{ github.workspace }}
         env:
           HAS_PRIVATE_KEY: ${{ secrets.PRIVATE_KEY != '' }}
           HAS_TESTNET_RPC: ${{ secrets.SEPOLIA_DEPLOYMENT_RPC_URL != '' }}
