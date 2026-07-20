@@ -225,7 +225,8 @@ async function main() {
   const newImplAddress = await newImpl.getAddress();
 
   const proxyAsOwner = await ethers.getContractAt(CONTRACT_NAME, address, ownerSigner);
-  await proxyAsOwner.upgradeToAndCall(newImplAddress, '0x');
+  const reinitializeV4Data = factory.interface.encodeFunctionData('reinitializeV4', [[]]);
+  await proxyAsOwner.upgradeToAndCall(newImplAddress, reinitializeV4Data);
 
   const postImplementation = await getImplementationAddress(address);
   assert(postImplementation === newImplAddress, 'implementation address mismatch after upgrade');
@@ -386,13 +387,14 @@ async function main() {
   console.log('\n═══ 6. Verifying security invariants ═══\n');
 
   await assertReverts(
-    () => upgraded.initialize('hack', 'HACK', 'uri', pre.underlying, pre.owner, [], '0x00000000', false),
+    () => upgraded.initialize('hack', 'HACK', 'uri', pre.underlying, pre.owner, [], '0x00000000', false, []),
     'initialize should not be replayable',
   );
   await assertReverts(
     () => upgraded.reinitializeV3([], '0x00000000', false),
     'reinitializeV3 should not be replayable',
   );
+  await assertReverts(() => upgraded.reinitializeV4([]), 'reinitializeV4 should not be replayable');
   console.log('  Re-initialization blocked: OK');
 
   const [nonOwner] = await ethers.getSigners();
