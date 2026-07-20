@@ -283,7 +283,7 @@ contract ConfidentialWrapper is
             revert ObserverAlreadyConfigured(observer);
         }
 
-        FHE.delegateUserDecryptionWithoutExpiration(observer, WILDCARD_CONTRACT);
+        FHE.delegateUserDecryption(observer, WILDCARD_CONTRACT, type(uint64).max);
         emit ObserverAdded(observer);
     }
 

@@ -109,7 +109,7 @@ const config: HardhatUserConfig = {
     apiKey: process.env.ETHERSCAN_API_KEY!,
   },
   exposed: {
-    imports: true,
+    imports: false,
     initializers: true,
   },
 };
