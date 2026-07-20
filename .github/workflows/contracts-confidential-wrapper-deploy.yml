@@ -191,28 +191,22 @@ jobs:
           # Proxy artifact name contains spaces/parens — read it in Node.
           PROXY=$(node -e "const p=require('./'+process.argv[1]);const d=require('./deployments/'+process.argv[2]+'/ConfidentialWrapper_'+p.name+'_Proxy.json');process.stdout.write(d.address)" "$PARAMS_FILE" "$NETWORK")
           echo "Proxy address: $PROXY"
-          # Retry around two independent transients: Etherscan indexing lag (needs
-          # a wait) and its per-second call cap, which the proxy-verification burst
-          # (impl check + proxy submit + link) can trip. Success is the task's own
-          # exit code; an already-verified proxy also counts as done, so retries
-          # converge instead of re-submitting.
-          for attempt in $(seq 1 8); do
-            set +e
-            out=$(npx hardhat task:verifyConfidentialWrapper --proxy-address "$PROXY" --network "$NETWORK" 2>&1)
-            rc=$?
-            set -e
-            echo "$out"
-            if [ "$rc" -eq 0 ]; then
+          # An empty key drops hardhat-verify to Etherscan's unauthenticated ~3/sec
+          # tier, which retries cannot beat.
+          if [ -z "${ETHERSCAN_API_KEY:-}" ]; then
+            echo "::warning::ETHERSCAN_API_KEY is empty in the ${NETWORK}-deploy environment; verification will likely be rate-limited. Deploy is unaffected."
+          fi
+          # Minimal retry around Etherscan indexing lag: 10s increments capped at 30s.
+          for attempt in 1 2 3 4 5; do
+            if npx hardhat task:verifyConfidentialWrapper --proxy-address "$PROXY" --network "$NETWORK"; then
               echo "Verification succeeded on attempt $attempt"
               exit 0
             fi
-            if echo "$out" | grep -qiE "proxy ${PROXY}.*already.*verified|already.*verified.*proxy ${PROXY}"; then
-              echo "Proxy already verified; treating as success."
-              exit 0
+            if [ "$attempt" -lt 5 ]; then
+              delay=$((attempt * 10)); [ "$delay" -gt 30 ] && delay=30
+              echo "Verify attempt $attempt failed; retrying in ${delay}s..."
+              sleep "$delay"
             fi
-            delay=$((attempt * 20))
-            echo "Verify attempt $attempt failed (rate limit or indexing lag); backing off ${delay}s..."
-            sleep "$delay"
           done
           echo "::warning::Etherscan verification did not complete — deploy is fine; re-run: npx hardhat task:verifyConfidentialWrapper --proxy-address ${PROXY} --network ${NETWORK}"
           exit 1
