@@ -191,16 +191,30 @@ jobs:
           # Proxy artifact name contains spaces/parens — read it in Node.
           PROXY=$(node -e "const p=require('./'+process.argv[1]);const d=require('./deployments/'+process.argv[2]+'/ConfidentialWrapper_'+p.name+'_Proxy.json');process.stdout.write(d.address)" "$PARAMS_FILE" "$NETWORK")
           echo "Proxy address: $PROXY"
-          # Retry around Etherscan indexing lag.
-          for i in 1 2 3 4 5; do
-            if npx hardhat task:verifyConfidentialWrapper --proxy-address "$PROXY" --network "$NETWORK"; then
-              echo "Verification succeeded on attempt $i"
+          # Retry around two independent transients: Etherscan indexing lag (needs
+          # a wait) and its per-second call cap, which the proxy-verification burst
+          # (impl check + proxy submit + link) can trip. Success is the task's own
+          # exit code; an already-verified proxy also counts as done, so retries
+          # converge instead of re-submitting.
+          for attempt in $(seq 1 8); do
+            set +e
+            out=$(npx hardhat task:verifyConfidentialWrapper --proxy-address "$PROXY" --network "$NETWORK" 2>&1)
+            rc=$?
+            set -e
+            echo "$out"
+            if [ "$rc" -eq 0 ]; then
+              echo "Verification succeeded on attempt $attempt"
               exit 0
             fi
-            echo "Verify attempt $i failed; sleeping 15s for Etherscan indexing..."
-            sleep 15
+            if echo "$out" | grep -qiE "proxy ${PROXY}.*already.*verified|already.*verified.*proxy ${PROXY}"; then
+              echo "Proxy already verified; treating as success."
+              exit 0
+            fi
+            delay=$((attempt * 20))
+            echo "Verify attempt $attempt failed (rate limit or indexing lag); backing off ${delay}s..."
+            sleep "$delay"
           done
-          echo "::warning::Etherscan verification did not succeed after 5 attempts — deploy is fine, verification is re-runnable"
+          echo "::warning::Etherscan verification did not complete — deploy is fine; re-run: npx hardhat task:verifyConfidentialWrapper --proxy-address ${PROXY} --network ${NETWORK}"
           exit 1
 
       - name: Post-deploy checks
