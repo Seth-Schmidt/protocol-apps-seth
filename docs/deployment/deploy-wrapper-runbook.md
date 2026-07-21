@@ -71,9 +71,32 @@ Pick the option that matches your task:
 
 > ⚠️ **Do not use as-is.** Fresh V3 deployments are blocked until V4 ships. Follow [`temp-wrapper-deployment-workaround.md`](./temp-wrapper-deployment-workaround.md) instead.
 
-### Step 1 — Set up the environment
+### Step 1 — Deploy and verify the wrapper
 
-From the `contracts/confidential-wrapper` directory:
+Pick one path below. Both leave you with a deployed, Etherscan-verified proxy; then continue to **Step 2**.
+
+#### Path A — GitHub Actions (recommended)
+
+The standard fresh deploy (proxy + implementation at repo `HEAD`, verify, emit DAO-registration info) can be run from CI instead of a laptop, via the **contracts-confidential-wrapper-deploy** workflow. This keeps the deployer key in a reviewed GitHub Environment and commits deployment state back to the repo.
+
+1. **Add the params file.** Open a PR adding `contracts/confidential-wrapper/deploy-params/<network>/<wrapper>.json` (fields documented in [`deploy-params/README.md`](../../contracts/confidential-wrapper/deploy-params/README.md)). The `owner` **must** be the network DAO — the workflow's preflight hard-fails otherwise. Merge the PR before deploying (the workflow only runs reviewed code on `main`).
+2. **Dispatch the workflow.** From the Actions tab, run **contracts-confidential-wrapper-deploy** with:
+   - `network` — `testnet` or `mainnet`
+   - `wrapper` — the token symbol, which must match a params file under `deploy-params/<network>/`, e.g. `cUSDT` for `deploy-params/<network>/cUSDT.json`
+   - `force_redeploy` — leave `false` unless you intend to deploy a second proxy for a name that already exists
+3. **Approve the environment gate.** The run pauses until a required reviewer for the `<network>-deploy` environment approves. Anyone may dispatch, but nothing runs or spends deployer funds without approval.
+4. **Read the results.** The run summary lists the proxy + implementation addresses, verified Etherscan status, `isConfidentialTokenValid` (expected `false` pre-registration), and the ready-made `registerConfidentialToken(address,address)` calldata for the DAO proposal. Full details are also in the uploaded `deploy-log.json` artifact.
+5. **Merge the state PR.** On a successful deploy the workflow opens a `deploy/wrapper-<network>-<wrapper>-<run_id>` PR committing the `deployments/` artifacts and `.openzeppelin/` manifest. Merge it promptly so the next run starts from committed state (it reuses the implementation from the manifest).
+
+The workflow already verifies the wrapper on Etherscan, so skip Path B and continue to **Step 2** below.
+
+> **Operator setup (one-time, GitHub admin):** create the `testnet-deploy` / `mainnet-deploy` environments with required reviewers (enable "prevent self-review") and a deployment-branch policy of `main` only; add environment secrets `PRIVATE_KEY` (a dedicated per-network deployer), `SEPOLIA_DEPLOYMENT_RPC_URL` for `testnet-deploy` or `MAINNET_DEPLOYMENT_RPC_URL` for `mainnet-deploy`, and `ETHERSCAN_API_KEY`; fund the deployer wallets above `minDeployerBalanceWei`; and enable repo Actions setting "Allow GitHub Actions to create and approve pull requests" (the state-PR job needs it).
+
+#### Path B — Manual deployment
+
+Prefer Path A above. The steps below are the manual equivalent, still valid for exceptional deploys. Run them from the `contracts/confidential-wrapper` directory.
+
+##### Set up the environment
 
 ```bash
 cp .env.example .env
@@ -103,7 +126,7 @@ CONFIDENTIAL_WRAPPER_UNDERLYING_DENY_LIST_SELECTOR_{i}=   # bytes4, e.g. 0xfe575
 CONFIDENTIAL_WRAPPER_HAS_UNDERLYING_DENY_LIST_SELECTOR_{i}=  # true | false
 ```
 
-### Step 2 — Deploy
+##### Deploy
 
 **Batch (recommended when deploying multiple wrappers):**
 
@@ -140,7 +163,7 @@ On success, each wrapper prints:
 
 Record the proxy address for every wrapper.
 
-### Step 3 — Verify on Etherscan
+##### Verify on Etherscan
 
 **Batch:**
 
@@ -158,7 +181,7 @@ npx hardhat task:verifyConfidentialWrapper \
 
 This verifies both the proxy contract and the implementation contract. Since all wrappers share the same implementation bytecode, the implementation source will already be verified from the second wrapper onward. Etherscan will report a duplicate-verification notice, which is expected.
 
-### Step 4 — Register in the Wrappers Registry (DAO action)
+### Step 2 — Register in the Wrappers Registry (DAO action)
 
 The wrapper is not active until the Protocol DAO registers it. This is an onchain governance action and cannot be executed by the deployer.
 
@@ -173,13 +196,10 @@ registry.registerConfidentialToken(
 
 See the [Creating Ethereum Proposals](../governance/creating-proposals-ethereum.md) guide for help on creating a new proposal.
 
-### Step 5 — Update the addresses directory
+### Step 3 — Record addresses
 
-Open a PR on `zama-ai/protocol-apps` with an entry for each new wrapper in the appropriate file in `protocol-apps/docs/addresses/{network}/{chain}` under "Confidential Wrappers":
-
-```markdown
-| Confidential TOKEN | `cTOKEN` | [`0x...`](https://etherscan.io/address/0x...) | [`0x...`](https://etherscan.io/token/0x...) |
-```
+Update the `protocol-registry` repo with the deployed wrapper addresses (proxy +
+underlying ERC-20) for each new wrapper, and ping the repo owners to review and merge.
 
 ---
 
@@ -189,7 +209,7 @@ Upgrades are a two-phase process: the deployer deploys a new implementation cont
 
 ### Step 1 — Check for an existing implementation
 
-Before deploying, confirm whether a matching implementation for this version already exists. Check:
+Before deploying, confirm whether a matching implementation for this version already exists. Live-network deployment state (`deployments/<network>/` and `.openzeppelin/<network>.json`) is committed to the repo, so these checks work from a fresh clone. Check:
 
 - Existing wrapper deployments may have the implementation that you need already
 - `.openzeppelin/<network>.json` for an entry matching the current source.
