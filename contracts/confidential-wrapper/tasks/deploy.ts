@@ -1,7 +1,6 @@
 import { isDfnsConfigured, loadDfnsDeployerSigner, resolveDfnsDeployerAddress } from './dfns';
 import { getRequiredEnvVar } from './utils/loadVariables';
 import { Signer, Wallet } from 'ethers';
-import { appendFileSync } from 'fs';
 import { task, types } from 'hardhat/config';
 import { HardhatRuntimeEnvironment } from 'hardhat/types';
 
@@ -281,16 +280,3 @@ task('task:verifyConfidentialWrapperImpl')
     console.log(`Verifying ${CONTRACT_NAME} implementation at ${implAddress}...\n`);
     await run('verify:verify', { address: implAddress, constructorArguments: [] });
   });
-
-// Print the deployer address for the active network — the DFNS wallet address when
-// DFNS is configured, else the address derived from the local signing key. This is
-// the deploy workflow's "resolve deployer address" (DFNS swap point 1) and makes no
-// RPC call. Writes `address=<addr>` to $GITHUB_OUTPUT when present so the value is
-// captured cleanly regardless of any surrounding stdout.
-task('task:printDeployerAddress').setAction(async function (_, hre) {
-  const address = await resolveDeployerAddress(hre);
-  console.log(`Deployer address: ${address}`);
-  if (process.env.GITHUB_OUTPUT) {
-    appendFileSync(process.env.GITHUB_OUTPUT, `address=${address}\n`);
-  }
-});
