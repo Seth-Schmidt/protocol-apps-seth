@@ -4,7 +4,7 @@
  * fills nonce/fees) and the id→hash poll (resolve on a hash, throw a DFNS reason on
  * Rejected, time out rather than hang). No credentials or chain needed.
  */
-import { awaitBroadcastTxHash, eip1559BodyFromTx, type DfnsTransaction } from '../../tasks/dfns/broadcast';
+import { awaitBroadcastTxHash, eip1559BodyFromTx, type DfnsTransaction } from '../../tasks/utils/dfns/broadcast';
 import { expect } from 'chai';
 
 // A getTransaction stub returning a fixed status, for the poll tests.

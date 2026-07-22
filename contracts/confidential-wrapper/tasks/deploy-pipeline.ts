@@ -1,21 +1,34 @@
 import { CONTRACT_NAME, getConfidentialWrapperProxyName, resolveDeployerAddress } from './deploy';
+import { loadNetworkConfig, networkParamsPaths, readJsonFile } from './utils/deployParams';
 import { getVersion, Manifest } from '@openzeppelin/upgrades-core';
 import { execSync } from 'child_process';
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { appendFileSync, writeFileSync } from 'fs';
 import { task, types } from 'hardhat/config';
 import { HardhatRuntimeEnvironment } from 'hardhat/types';
 import { resolve } from 'path';
 
-// These CI tasks wrap the existing deploy/verify tasks with the validation,
-// idempotency guards and structured reporting the GitHub Actions deploy
-// workflow needs. All path/JSON handling lives here (in Node) rather than in
-// the workflow shell because deployment artifact names contain spaces and
-// parentheses.
+// CI tasks that wrap the deploy/verify tasks with validation, idempotency guards and
+// structured reporting. Path/JSON handling lives here (not the workflow shell) because
+// artifact names contain spaces and parentheses.
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const BYTES4_RE = /^0x[0-9a-fA-F]{8}$/;
 
-// Fields mirror ConfidentialWrapperInitConfig in ./deploy.ts
+// A wrapper entry in deploy-params/<tier>/<network>/wrappers.json. The underlying address is
+// the object key (never a field). name/symbol/contractUri are optional — defaulted from the
+// underlying's on-chain metadata (see resolveWrapperParams).
+type WrapperEntry = {
+  name?: string;
+  symbol?: string;
+  contractUri?: string;
+  owner: string;
+  blockedUsers: string[];
+  underlyingDenyListSelector: string;
+  hasUnderlyingDenyListSelector: boolean;
+};
+
+// Fully-resolved wrapper params (all defaults filled in), ready for the deploy task.
+// Mirrors ConfidentialWrapperInitConfig in ./deploy.ts.
 type WrapperParams = {
   name: string;
   symbol: string;
@@ -27,43 +40,19 @@ type WrapperParams = {
   hasUnderlyingDenyListSelector: boolean;
 };
 
-type NetworkConfig = {
-  chainId: number;
-  ozManifest: string;
-  dao: string;
-  registry: string;
-  minDeployerBalanceWei: string;
-};
-
-// Minimal registry ABI — only what the reporter needs.
+// Minimal registry ABI. getConfidentialTokenAddress(token) → (isValid, confidentialToken):
+// (false, 0x0) never registered, (true, wrapper) valid, (false, wrapper) revoked.
 const REGISTRY_ABI = [
+  'function getConfidentialTokenAddress(address token) view returns (bool isValid, address confidentialToken)',
   'function isConfidentialTokenValid(address confidentialToken) view returns (bool)',
   'function registerConfidentialToken(address token, address confidentialToken)',
 ];
 
-function readJsonFile<T>(path: string): T {
-  if (!existsSync(path)) {
-    throw new Error(`File not found: ${path}`);
-  }
-  try {
-    return JSON.parse(readFileSync(path, 'utf8')) as T;
-  } catch (err) {
-    throw new Error(`Failed to parse JSON at ${path}: ${(err as Error).message}`);
-  }
-}
-
-// networks.json lives next to this file's deploy-params dir, resolved relative
-// to the task file so the cwd doesn't matter.
-function loadNetworkConfig(hre: HardhatRuntimeEnvironment): NetworkConfig {
-  const networks = readJsonFile<Record<string, NetworkConfig>>(resolve(__dirname, '../deploy-params/networks.json'));
-  const config = networks[hre.network.name];
-  if (!config) {
-    throw new Error(
-      `No entry for network "${hre.network.name}" in deploy-params/networks.json (have: ${Object.keys(networks).join(', ')})`,
-    );
-  }
-  return config;
-}
+// ERC-20 metadata ABI, used to derive default name/symbol from the underlying.
+const ERC20_METADATA_ABI = [
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+];
 
 function assertAddress(hre: HardhatRuntimeEnvironment, value: unknown, field: string): void {
   if (typeof value !== 'string' || !ADDRESS_RE.test(value)) {
@@ -76,25 +65,105 @@ function assertAddress(hre: HardhatRuntimeEnvironment, value: unknown, field: st
   }
 }
 
-// Validate a params file against the wrapper init schema. Throws on any problem
-// (params are unusable if malformed — there is no partial deploy).
-function loadAndValidateParams(hre: HardhatRuntimeEnvironment, paramsFile: string): WrapperParams {
-  const p = readJsonFile<WrapperParams>(resolve(paramsFile));
+// Load and validate the wrapper entry for `underlying` (checksum-insensitive key lookup) from
+// deploy-params/<tier>/<network>/wrappers.json. Throws on any problem — a malformed entry is
+// unusable. Optional name/symbol/contractUri are validated only when present.
+function loadWrapperEntry(
+  hre: HardhatRuntimeEnvironment,
+  underlying: string,
+): WrapperEntry & { underlying: string } {
+  assertAddress(hre, underlying, 'underlying');
+  const target = hre.ethers.getAddress(underlying);
 
-  if (typeof p.name !== 'string' || p.name.length === 0) throw new Error('name must be a non-empty string');
-  if (typeof p.symbol !== 'string' || p.symbol.length === 0) throw new Error('symbol must be a non-empty string');
-  if (typeof p.contractUri !== 'string' || p.contractUri.length === 0)
-    throw new Error('contractUri must be a non-empty string');
-  assertAddress(hre, p.underlying, 'underlying');
-  assertAddress(hre, p.owner, 'owner');
-  if (!Array.isArray(p.blockedUsers)) throw new Error('blockedUsers must be an array');
-  p.blockedUsers.forEach((addr, i) => assertAddress(hre, addr, `blockedUsers[${i}]`));
-  if (typeof p.underlyingDenyListSelector !== 'string' || !BYTES4_RE.test(p.underlyingDenyListSelector))
-    throw new Error(`underlyingDenyListSelector must be a 0x-prefixed bytes4, got: ${p.underlyingDenyListSelector}`);
-  if (typeof p.hasUnderlyingDenyListSelector !== 'boolean')
+  const { tier, wrappersJson } = networkParamsPaths(hre.network.name);
+  const paramsFile = `deploy-params/${tier}/${hre.network.name}/wrappers.json`;
+  const networkEntries = readJsonFile<Record<string, WrapperEntry>>(wrappersJson);
+
+  let entry: WrapperEntry | undefined;
+  for (const [key, value] of Object.entries(networkEntries)) {
+    let keyAddress: string;
+    try {
+      keyAddress = hre.ethers.getAddress(key);
+    } catch {
+      throw new Error(`Invalid underlying address key "${key}" in ${paramsFile}`);
+    }
+    if (keyAddress === target) {
+      entry = value;
+      break;
+    }
+  }
+  if (!entry) {
+    throw new Error(
+      `No wrapper params for underlying ${target} in ${paramsFile} ` +
+        `(have: ${Object.keys(networkEntries).join(', ') || '<none>'})`,
+    );
+  }
+
+  // Required fields.
+  assertAddress(hre, entry.owner, 'owner');
+  if (!Array.isArray(entry.blockedUsers)) throw new Error('blockedUsers must be an array');
+  entry.blockedUsers.forEach((addr, i) => assertAddress(hre, addr, `blockedUsers[${i}]`));
+  if (typeof entry.underlyingDenyListSelector !== 'string' || !BYTES4_RE.test(entry.underlyingDenyListSelector))
+    throw new Error(`underlyingDenyListSelector must be a 0x-prefixed bytes4, got: ${entry.underlyingDenyListSelector}`);
+  if (typeof entry.hasUnderlyingDenyListSelector !== 'boolean')
     throw new Error('hasUnderlyingDenyListSelector must be a boolean');
 
-  return p;
+  // Optional fields: validated only when present (otherwise defaulted from on-chain metadata).
+  if (entry.name !== undefined && (typeof entry.name !== 'string' || entry.name.length === 0))
+    throw new Error('name, when set, must be a non-empty string');
+  if (entry.symbol !== undefined && (typeof entry.symbol !== 'string' || entry.symbol.length === 0))
+    throw new Error('symbol, when set, must be a non-empty string');
+  if (entry.contractUri !== undefined && (typeof entry.contractUri !== 'string' || entry.contractUri.length === 0))
+    throw new Error('contractUri, when set, must be a non-empty string');
+
+  return { ...entry, underlying: target };
+}
+
+// Read the underlying's name()/symbol() to default an entry that omits them. Throws a helpful
+// error for non-standard tokens (e.g. bytes32 metadata); the operator can set name/symbol instead.
+async function readUnderlyingMetadata(
+  hre: HardhatRuntimeEnvironment,
+  underlying: string,
+): Promise<{ name: string; symbol: string }> {
+  try {
+    const token = new hre.ethers.Contract(underlying, ERC20_METADATA_ABI, hre.ethers.provider);
+    const [name, symbol] = await Promise.all([token.name(), token.symbol()]);
+    return { name, symbol };
+  } catch (err) {
+    throw new Error(
+      `Could not read name()/symbol() from underlying ${underlying} on ${hre.network.name} ` +
+        `(${(err as Error).message}). Set name and symbol explicitly in deploy-params/<tier>/<network>/wrappers.json.`,
+    );
+  }
+}
+
+// Build the default contractUri metadata blob from the resolved name/symbol.
+function defaultContractUri(name: string, symbol: string, underlyingSymbol: string): string {
+  const metadata = JSON.stringify({ name, symbol, description: `Confidential wrapper of ${underlyingSymbol}` });
+  return `data:application/json;utf8,${metadata}`;
+}
+
+// Resolve an entry into fully-populated params, defaulting name/symbol/contractUri from on-chain
+// metadata when omitted. Only touches RPC when a default is needed.
+async function resolveWrapperParams(hre: HardhatRuntimeEnvironment, underlying: string): Promise<WrapperParams> {
+  const entry = loadWrapperEntry(hre, underlying);
+  let { name, symbol, contractUri } = entry;
+  if (name === undefined || symbol === undefined || contractUri === undefined) {
+    const meta = await readUnderlyingMetadata(hre, entry.underlying);
+    if (name === undefined) name = `Confidential ${meta.name}`;
+    if (symbol === undefined) symbol = `c${meta.symbol}`;
+    if (contractUri === undefined) contractUri = defaultContractUri(name, symbol, meta.symbol);
+  }
+  return {
+    name,
+    symbol,
+    contractUri,
+    underlying: entry.underlying,
+    owner: entry.owner,
+    blockedUsers: entry.blockedUsers,
+    underlyingDenyListSelector: entry.underlyingDenyListSelector,
+    hasUnderlyingDenyListSelector: entry.hasUnderlyingDenyListSelector,
+  };
 }
 
 function currentGitSha(): string {
@@ -106,15 +175,14 @@ function currentGitSha(): string {
   }
 }
 
-// Report whether the current implementation source will be reused from the OZ
-// manifest or freshly deployed. Best-effort and never throws — the definitive
-// decision is made by deployProxy at broadcast time.
+// Report whether the implementation will be reused from the OZ manifest or freshly deployed.
+// Best-effort and never throws — deployProxy makes the definitive call at broadcast time.
 async function reportImplReuse(hre: HardhatRuntimeEnvironment): Promise<string> {
   try {
     const factory = await hre.ethers.getContractFactory(CONTRACT_NAME);
     const bytecode = factory.bytecode;
     const version = getVersion(bytecode, bytecode);
-    // Use the EIP-1193 network provider, matching the OZ upgrades plugin.
+    // EIP-1193 network provider, matching the OZ upgrades plugin.
     const manifest = await Manifest.forNetwork(hre.network.provider);
     const data = await manifest.read();
     const existing = data.impls[version.linkedWithoutMetadata];
@@ -127,13 +195,8 @@ async function reportImplReuse(hre: HardhatRuntimeEnvironment): Promise<string> 
   }
 }
 
-// ---------------------------------------------------------------------------
-// task:printDeployerAddress
-// Prints the deployer address for the active network — the DFNS wallet address when
-// DFNS is configured, else derived from the local signing key. Makes no RPC call, and
-// writes `address=<addr>` to $GITHUB_OUTPUT when present so the workflow captures it
-// cleanly regardless of surrounding stdout.
-// ---------------------------------------------------------------------------
+// task:printDeployerAddress — print the deployer address (DFNS wallet or local key). No RPC call;
+// writes `address=<addr>` to $GITHUB_OUTPUT so the workflow captures it regardless of stdout.
 task('task:printDeployerAddress').setAction(async function (_, hre) {
   const address = await resolveDeployerAddress(hre);
   console.log(`Deployer address: ${address}`);
@@ -142,28 +205,25 @@ task('task:printDeployerAddress').setAction(async function (_, hre) {
   }
 });
 
-// ---------------------------------------------------------------------------
-// task:preflightConfidentialWrapper
-// Read-only validation gate run before broadcasting a deploy. FORCE_REDEPLOY=true
-// bypasses only the existing-proxy guard.
-// ---------------------------------------------------------------------------
+// task:preflightConfidentialWrapper — read-only validation gate run before broadcasting.
+// FORCE_REDEPLOY=true bypasses only the existing-proxy guard.
 task('task:preflightConfidentialWrapper')
-  .addParam('paramsFile', 'Path to the wrapper params JSON file', undefined, types.string)
+  .addParam('underlying', 'Underlying ERC-20 address; selects the entry in deploy-params/<tier>/<network>/wrappers.json', undefined, types.string)
   .addParam('deployerAddress', 'The resolved deployer address (public info)', undefined, types.string)
-  .setAction(async function ({ paramsFile, deployerAddress }, hre) {
+  .setAction(async function ({ underlying, deployerAddress }, hre) {
     const { ethers, deployments } = hre;
     const forceRedeploy = process.env.FORCE_REDEPLOY === 'true';
 
-    // Schema validation is fatal — nothing else can run against bad params.
-    const params = loadAndValidateParams(hre, paramsFile);
+    // Fatal: nothing else can run against bad params.
+    const params = await resolveWrapperParams(hre, underlying);
     assertAddress(hre, deployerAddress, 'deployerAddress');
-    const networkConfig = loadNetworkConfig(hre);
+    const networkConfig = loadNetworkConfig(hre.network.name);
 
     const failures: string[] = [];
     const lines: string[] = [`Preflight for "${params.name}" (${params.symbol}) on ${hre.network.name}:`];
 
-    // Owner MUST be the network DAO — a wrong owner breaks governance execution
-    // and there is no CI escape hatch (exceptional deploys use the manual runbook).
+    // Owner MUST be the network DAO — a wrong owner breaks governance execution; no CI
+    // escape hatch (exceptional deploys use the manual runbook).
     if (ethers.getAddress(params.owner) !== ethers.getAddress(networkConfig.dao)) {
       failures.push(`owner ${params.owner} !== network DAO ${networkConfig.dao} (owner must be the DAO)`);
     } else {
@@ -198,7 +258,7 @@ task('task:preflightConfidentialWrapper')
     }
 
     // Proxy-redeploy guard: refuse to re-deploy an existing proxy name unless forced.
-    const proxyName = getConfidentialWrapperProxyName(params.name);
+    const proxyName = getConfidentialWrapperProxyName(params.symbol);
     const existingProxy = await deployments.getOrNull(proxyName);
     if (existingProxy && !forceRedeploy) {
       failures.push(
@@ -208,6 +268,24 @@ task('task:preflightConfidentialWrapper')
       lines.push(`  ! proxy "${proxyName}" exists at ${existingProxy.address} — FORCE_REDEPLOY set, will deploy anew`);
     } else {
       lines.push(`  ✓ no existing proxy named "${proxyName}"`);
+    }
+
+    // Registry dedup (authoritative, keyed by underlying): one wrapper per token, revocation is
+    // permanent. Hard fail — force_redeploy does NOT bypass it (a second proxy could never be
+    // registered). Exceptional cases use the manual runbook.
+    try {
+      const registry = new ethers.Contract(networkConfig.registry, REGISTRY_ABI, ethers.provider);
+      const [isValid, registered] = await registry.getConfidentialTokenAddress(params.underlying);
+      if (registered && registered !== ethers.ZeroAddress) {
+        failures.push(
+          `underlying ${params.underlying} already has a confidential wrapper ${registered} in the registry ` +
+            `(${isValid ? 'valid' : 'revoked'}); a token may have only one wrapper — refusing to deploy another`,
+        );
+      } else {
+        lines.push(`  ✓ registry has no confidential wrapper for underlying ${params.underlying}`);
+      }
+    } catch (err) {
+      failures.push(`could not query registry ${networkConfig.registry} for underlying ${params.underlying}: ${(err as Error).message}`);
     }
 
     // No-broadcast implementation validation (UUPS).
@@ -229,16 +307,14 @@ task('task:preflightConfidentialWrapper')
     console.log('\n✅ Preflight passed');
   });
 
-// ---------------------------------------------------------------------------
-// task:deployConfidentialWrapperFromParams
-// Thin wrapper: parse+validate the params file, delegate to the existing
-// task:deployConfidentialWrapper. No new deploy logic.
-// ---------------------------------------------------------------------------
+// task:deployConfidentialWrapperFromParams — resolve the entry (filling defaults), delegate to
+// task:deployConfidentialWrapper, and emit the proxy address to $GITHUB_OUTPUT so downstream
+// steps need not reconstruct the artifact name. No new deploy logic.
 task('task:deployConfidentialWrapperFromParams')
-  .addParam('paramsFile', 'Path to the wrapper params JSON file', undefined, types.string)
-  .setAction(async function ({ paramsFile }, hre) {
-    const params = loadAndValidateParams(hre, paramsFile);
-    await hre.run('task:deployConfidentialWrapper', {
+  .addParam('underlying', 'Underlying ERC-20 address; selects the entry in deploy-params/<tier>/<network>/wrappers.json', undefined, types.string)
+  .setAction(async function ({ underlying }, hre) {
+    const params = await resolveWrapperParams(hre, underlying);
+    const proxyAddress: string = await hre.run('task:deployConfidentialWrapper', {
       name: params.name,
       symbol: params.symbol,
       contractUri: params.contractUri,
@@ -248,28 +324,28 @@ task('task:deployConfidentialWrapperFromParams')
       underlyingDenyListSelector: params.underlyingDenyListSelector,
       hasUnderlyingDenyListSelector: params.hasUnderlyingDenyListSelector,
     });
+    if (process.env.GITHUB_OUTPUT && proxyAddress) {
+      appendFileSync(process.env.GITHUB_OUTPUT, `proxy=${proxyAddress}\n`);
+    }
   });
 
-// ---------------------------------------------------------------------------
-// task:reportConfidentialWrapper
-// Tolerant post-deploy reporter — safe under `if: always()`. Writes structured
-// JSON to --out and a markdown block to $GITHUB_STEP_SUMMARY. Only exits nonzero
-// on a mismatch when --strict is passed.
-// ---------------------------------------------------------------------------
+// task:reportConfidentialWrapper — tolerant post-deploy reporter, safe under `if: always()`.
+// Writes JSON to --out and a markdown block to $GITHUB_STEP_SUMMARY. Exits nonzero on a
+// mismatch only with --strict.
 task('task:reportConfidentialWrapper')
-  .addParam('paramsFile', 'Path to the wrapper params JSON file', undefined, types.string)
+  .addParam('underlying', 'Underlying ERC-20 address; selects the entry in deploy-params/<tier>/<network>/wrappers.json', undefined, types.string)
   .addParam('out', 'Path to write the structured deploy-log JSON', 'deploy-log.json', types.string)
   .addFlag('strict', 'Exit nonzero if any post-deploy check mismatches')
-  .setAction(async function ({ paramsFile, out, strict }, hre) {
+  .setAction(async function ({ underlying, out, strict }, hre) {
     const { ethers, deployments, upgrades } = hre;
-    const params = loadAndValidateParams(hre, paramsFile);
-    const networkConfig = loadNetworkConfig(hre);
+    const params = await resolveWrapperParams(hre, underlying);
+    const networkConfig = loadNetworkConfig(hre.network.name);
 
     const checks: { name: string; expected: unknown; actual: unknown; ok: boolean }[] = [];
     const record = (name: string, expected: unknown, actual: unknown) =>
       checks.push({ name, expected, actual, ok: String(expected).toLowerCase() === String(actual).toLowerCase() });
 
-    const proxyName = getConfidentialWrapperProxyName(params.name);
+    const proxyName = getConfidentialWrapperProxyName(params.symbol);
     const proxyDeployment = await deployments.getOrNull(proxyName);
 
     const log: Record<string, unknown> = {
@@ -316,6 +392,23 @@ task('task:reportConfidentialWrapper')
     record('underlying', params.underlying, await safeCall('underlying', () => proxy.underlying()));
     record('owner', params.owner, await safeCall('owner', () => proxy.owner()));
 
+    // Current on-chain registration status, keyed by underlying. Tolerant — never throws.
+    let registrationStatus: { registered: boolean; isValid: boolean; wrapper: string; matchesProxy: boolean } | null =
+      null;
+    try {
+      const registry = new ethers.Contract(networkConfig.registry, REGISTRY_ABI, ethers.provider);
+      const [isValid, wrapper] = await registry.getConfidentialTokenAddress(params.underlying);
+      const registered = Boolean(wrapper) && wrapper !== ethers.ZeroAddress;
+      registrationStatus = {
+        registered,
+        isValid: Boolean(isValid),
+        wrapper: registered ? ethers.getAddress(wrapper) : ethers.ZeroAddress,
+        matchesProxy: registered && ethers.getAddress(wrapper) === ethers.getAddress(proxyAddress),
+      };
+    } catch (err) {
+      summary.push(`- ⚠️ registry getConfidentialTokenAddress reverted: ${(err as Error).message}`);
+    }
+
     // Ready-made DAO registration payload: registerConfidentialToken(underlying, proxy).
     const registrationCalldata = new ethers.Interface(REGISTRY_ABI).encodeFunctionData('registerConfidentialToken', [
       params.underlying,
@@ -325,11 +418,27 @@ task('task:reportConfidentialWrapper')
 
     log.addresses = { proxy: proxyAddress, implementation: implAddress, underlying: params.underlying };
     log.checks = checks;
-    log.registration = { target: networkConfig.registry, calldata: registrationCalldata, cast: castCommand };
+    log.registration = {
+      target: networkConfig.registry,
+      calldata: registrationCalldata,
+      cast: castCommand,
+      status: registrationStatus,
+    };
+
+    const registrationSummary = !registrationStatus
+      ? '⚠️ could not read registry'
+      : !registrationStatus.registered
+        ? '⏳ not registered yet — submit the calldata below via the DAO'
+        : registrationStatus.matchesProxy
+          ? registrationStatus.isValid
+            ? '✅ registered & valid'
+            : '⚠️ registered but revoked (revocation is permanent)'
+          : `⚠️ underlying registered to a DIFFERENT wrapper ${registrationStatus.wrapper}`;
 
     summary.push(`- **Proxy:** \`${proxyAddress}\``);
     summary.push(`- **Implementation:** \`${implAddress}\``);
     summary.push(`- **Underlying:** \`${params.underlying}\``);
+    summary.push(`- **Registry status:** ${registrationSummary}`);
     summary.push('');
     summary.push('| Check | Expected | Actual | OK |');
     summary.push('| --- | --- | --- | --- |');

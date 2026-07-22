@@ -1,11 +1,8 @@
 /**
- * DFNS API authentication for the confidential-wrapper deployer.
- *
- * There is no raw-key path: the blockchain key never leaves DFNS custody. These
- * credentials only authenticate (bearer token) and authorize (a User Action Signature
- * from the credential keypair) API requests; signing and broadcasting happen inside
- * DFNS via `Wallets:BroadcastTransaction` (service accounts are not granted raw
- * `generateSignature`).
+ * DFNS API authentication for the confidential-wrapper deployer. No raw-key path — the blockchain
+ * key never leaves DFNS custody. These credentials only authenticate (bearer token) and authorize
+ * (User Action Signature from the credential keypair) API requests; signing/broadcasting happen
+ * inside DFNS via `Wallets:BroadcastTransaction`.
  */
 import { createPrivateKey } from 'node:crypto';
 
@@ -41,9 +38,8 @@ export function hasDfnsAuthEnv(): boolean {
 }
 
 /**
- * Load the DFNS auth credentials. `DFNS_API_URL` defaults to the DFNS production
- * host and `DFNS_ORG_ID` is optional, so the required secrets are the bearer token
- * and the credential keypair.
+ * Load the DFNS auth credentials. `DFNS_API_URL` defaults to the production host and `DFNS_ORG_ID`
+ * is optional, so the required secrets are the bearer token and the credential keypair.
  */
 export function loadDfnsAuth(): DfnsAuthConfig {
   return {
@@ -56,10 +52,9 @@ export function loadDfnsAuth(): DfnsAuthConfig {
 }
 
 /**
- * Repair a PEM whose newlines a secret store / env round-trip mangled (collapsed
- * to spaces, escaped as `\n`, or stripped) back to canonical form. This only
- * re-wraps whitespace — it never alters key material — so it's safe to always
- * apply. Without it, a flattened key fails to parse with `BAD_END_LINE`.
+ * Repair a PEM whose newlines a secret store / env round-trip mangled (collapsed to spaces,
+ * escaped as `\n`, or stripped) back to canonical form. Only re-wraps whitespace, never alters key
+ * material, so it's always safe. Without it, a flattened key fails to parse with `BAD_END_LINE`.
  */
 export function normalizePem(raw: string): string {
   const s = raw.trim().replace(/\\n/g, '\n');
@@ -72,10 +67,9 @@ export function normalizePem(raw: string): string {
 }
 
 /**
- * The credential signer for User Action Signing. The PEM is normalized first, and
- * the signing digest is chosen from the key type: EdDSA signs with no digest
- * (`undefined`), while ECDSA/RSA need one — DFNS verifies the resulting ES256 /
- * RS256 signature against the registered public key.
+ * The credential signer for User Action Signing. PEM is normalized first; the digest depends on
+ * key type — EdDSA signs with none (`undefined`), ECDSA/RSA need one (sha256). DFNS verifies the
+ * resulting signature against the registered public key.
  */
 function credentialSigner(auth: DfnsAuthConfig): AsymmetricKeySigner {
   const privateKey = normalizePem(auth.credentialPrivateKey);

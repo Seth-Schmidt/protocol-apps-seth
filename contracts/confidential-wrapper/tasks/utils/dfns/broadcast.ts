@@ -1,14 +1,4 @@
-/**
- * Pure helpers for the DFNS custody send path:
- *
- *  - `eip1559BodyFromTx` maps a resolved transaction to a DFNS `Eip1559` broadcast
- *    body: `from` is dropped (DFNS signs as the wallet), `gas`→`gasLimit`, and any
- *    field left unset is omitted so DFNS fills it — in particular the nonce, which
- *    DFNS owns.
- *  - `awaitBroadcastTxHash` polls a broadcast id until it carries a chain hash,
- *    throwing the DFNS reason on `Failed`/`Rejected` (a policy `Block` surfaces
- *    here) and timing out rather than hanging.
- */
+/** Pure helpers for the DFNS custody send path (see per-function docs below). */
 import type { DfnsApiClient } from '@dfns/sdk';
 
 /** The `Eip1559` variant of the DFNS broadcast body, derived from the installed SDK. */
@@ -19,10 +9,7 @@ export type Eip1559Body = Extract<BroadcastBody, { kind: 'Eip1559' }>;
 export type DfnsTransaction = Awaited<ReturnType<DfnsApiClient['wallets']['getTransaction']>>;
 type GetTransaction = (req: { walletId: string; transactionId: string }) => Promise<DfnsTransaction>;
 
-/**
- * A resolved transaction as `eip1559BodyFromTx` receives it: hex quantity strings,
- * with `to`/`data` already resolved. Fields left `undefined`/`null` are omitted.
- */
+/** A resolved transaction (hex quantity strings, `to`/`data` resolved). Null/undefined omitted. */
 export type Eip1559TxInput = {
   to?: string | null;
   data?: string | null;
@@ -45,9 +32,8 @@ export type AwaitTxHashOptions = {
 };
 
 /**
- * Maps a resolved transaction to a DFNS `Eip1559` broadcast body. `from` is dropped
- * (DFNS signs as the wallet) and `gas` becomes `gasLimit`. Fields left undefined are
- * omitted so DFNS fills them — in particular the nonce, which DFNS owns.
+ * Map a resolved transaction to a DFNS `Eip1559` broadcast body: `from` is dropped (DFNS signs as
+ * the wallet), `gas`→`gasLimit`, and unset fields are omitted so DFNS fills them (notably nonce).
  */
 export function eip1559BodyFromTx(tx: Eip1559TxInput): Eip1559Body {
   const body: Eip1559Body = { kind: 'Eip1559' };
@@ -62,12 +48,9 @@ export function eip1559BodyFromTx(tx: Eip1559TxInput): Eip1559Body {
 
 /* eslint-disable no-await-in-loop -- the poll must observe each status before the next */
 /**
- * Polls a broadcast transaction id until it carries a chain hash.
- *
- * A `Failed`/`Rejected` status throws with the DFNS reason (the policy `Block`
- * surfaces here); any status that exposes a `txHash` resolves it. A poll that
- * exceeds `timeoutMs` without a hash throws so the caller retries from chain state
- * rather than hanging.
+ * Poll a broadcast id until it carries a chain hash. `Failed`/`Rejected` throws with the DFNS
+ * reason (policy `Block` surfaces here); exceeding `timeoutMs` throws so the caller retries from
+ * chain state rather than hanging.
  */
 export async function awaitBroadcastTxHash(
   getTransaction: GetTransaction,

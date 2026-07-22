@@ -1,39 +1,37 @@
-# Deploy a ConfidentialWrapper from committed deploy-params.
+# Deploy a ConfidentialWrapper from committed deploy-params/<tier>/<network>/wrappers.json.
 #
 # Security model:
-#   - Runs in a GitHub Environment (<network>-deploy) with required reviewers, so
-#     nothing costs money until an approver signs off; secrets resolve only inside
-#     the approved job.
-#   - Environment deployment-branch policy = main only, so the approved run can
-#     only execute reviewed workflow code.
-#   - Signing is DFNS MPC custody when the DFNS auth secrets are set AND the network
-#     has a committed dfnsDeployerWalletId (deploy-params/networks.json); otherwise it
-#     falls back to PRIVATE_KEY. The signing secrets (DFNS_AUTH_TOKEN / DFNS_CRED_ID /
-#     DFNS_PRIVATE_KEY and PRIVATE_KEY) are exposed as step-level env on exactly two
-#     steps (resolve deployer address + deploy) — never job-level, never GITHUB_ENV.
-#     The DFNS wallet id is NOT a secret (it maps to a public address) and lives in
-#     committed config, not in the environment.
-#   - Deployment RPC secrets are mapped to SEPOLIA_RPC_URL / MAINNET_RPC_URL per step only.
+#   - Runs in a GitHub Environment (<tier>-<network>-deploy) with required reviewers, so nothing
+#     costs money until an approver signs off and secrets resolve only inside the approved job.
+#   - Environment branch policy = main only, so the approved run executes reviewed code.
+#   - Signing is DFNS MPC custody when the full DFNS set is present, else PRIVATE_KEY. Those
+#     secrets are step-level env on exactly two steps (resolve address + deploy) — never
+#     job-level, never GITHUB_ENV.
+#   - DEPLOYMENT_RPC_URL is a single per-environment secret, step-level env only.
 #   - The PR-opening job (contents: write) is separate and never sees PRIVATE_KEY.
 name: contracts-confidential-wrapper-deploy
 
 on:
   workflow_dispatch:
     inputs:
-      network:
-        description: 'Target network'
+      tier:
+        description: 'Deploy tier (selects the GitHub environment + deploy-params dir)'
         type: choice
         options:
           - testnet
           - mainnet
         default: testnet
         required: true
-      wrapper:
-        description: 'Token symbol, which must match a params file under deploy-params/<network>/. Enter cTEST for the file deploy-params/<network>/cTEST.json'
+      network:
+        description: 'Target chain / Hardhat network, e.g. sepolia or ethereum — must have a deploy-params/<tier>/<network>/ dir'
+        type: string
+        required: true
+      underlying:
+        description: 'Underlying ERC-20 address (0x…), which must have an entry in deploy-params/<tier>/<network>/wrappers.json'
         type: string
         required: true
       force_redeploy:
-        description: 'Deploy a new proxy even if one already exists for this wrapper name'
+        description: 'Deploy a new proxy even if one already exists for this wrapper symbol in committed state (does not bypass the registry one-wrapper-per-token check)'
         type: boolean
         default: false
         required: false
@@ -41,13 +39,12 @@ on:
 permissions: {}
 
 concurrency:
-  # Serialize per network; never cancel a run that may be broadcasting a deploy.
-  group: deploy-wrapper-${{ inputs.network }}
+  # Serialize per (tier, network); never cancel a run that may be broadcasting a deploy.
+  group: deploy-wrapper-${{ inputs.tier }}-${{ inputs.network }}
   cancel-in-progress: false
 
 env:
-  # Safe-chain enforces its own minimum-package-age check independently,
-  # mirror both the age (72 h) and the exclusion here.
+  # Mirror safe-chain's independent minimum-package-age check (age + exclusion).
   SAFE_CHAIN_MINIMUM_PACKAGE_AGE_HOURS: '72'
   SAFE_CHAIN_MINIMUM_PACKAGE_AGE_EXCLUSIONS: '@zama-fhe/relayer-sdk'
 
@@ -55,7 +52,7 @@ jobs:
   deploy:
     name: deploy
     runs-on: ubuntu-latest
-    environment: ${{ inputs.network }}-deploy
+    environment: ${{ inputs.tier }}-${{ inputs.network }}-deploy
     permissions:
       contents: 'read' # Required to checkout repository code
     timeout-minutes: 30
@@ -63,64 +60,55 @@ jobs:
       run:
         working-directory: contracts/confidential-wrapper
     env:
+      TIER: ${{ inputs.tier }}
       NETWORK: ${{ inputs.network }}
-      WRAPPER: ${{ inputs.wrapper }}
+      UNDERLYING: ${{ inputs.underlying }}
     outputs:
       deployed: ${{ steps.deploy.outputs.deployed }}
     steps:
-      # Checkout first so every subsequent run step has a valid working directory.
-      # The job default is contracts/confidential-wrapper, which does not exist on
-      # the runner until checkout populates it; running any `run:` step before this
-      # fails to start (no such working directory). The environment branch policy
-      # pins this checkout to reviewed main.
+      # Checkout first: the job default working-directory (contracts/confidential-wrapper) does not
+      # exist until checkout, so any earlier `run:` step fails to start. Branch policy pins to main.
       - name: Checkout project
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: 'false'
 
       # --- Guards (fail fast before the expensive setup below) ------------
-      - name: Guard — validate wrapper input
-        # WRAPPER is read via env (never interpolated into the script body) and
-        # path-validated before it is used to build a params-file path.
+      - name: Guard — validate underlying input
+        # UNDERLYING is read via env (never interpolated into the script) and validated as a
+        # 20-byte hex address before use.
         run: |
-          if ! printf '%s' "$WRAPPER" | grep -Eq '^[A-Za-z0-9._-]+$'; then
-            echo "::error::wrapper '$WRAPPER' contains invalid characters (allowed: A-Za-z0-9._-). Enter the token symbol only, e.g. cTEST"
+          if ! printf '%s' "$UNDERLYING" | grep -Eq '^0x[0-9a-fA-F]{40}$'; then
+            echo "::error::underlying '$UNDERLYING' is not a 0x-prefixed 20-byte address. Enter the underlying ERC-20 address, e.g. 0x9b5Cd13b8eFbB58Dc25A05CF411D8056058aDFfF"
             exit 1
           fi
 
       - name: Guard — signer configured
-        # Presence-check the required secrets. Only booleans (`secret != ''`) reach
-        # the runner, so no secret value is exposed as env. Signing is satisfied by
-        # EITHER the DFNS auth trio OR PRIVATE_KEY; the DFNS wallet id is non-secret
-        # config in networks.json, validated later by the deploy task.
+        # Presence-check the required secrets: only booleans (`secret != ''`) reach the runner, so
+        # no value is exposed. Signing needs EITHER the full DFNS set OR PRIVATE_KEY.
         env:
           HAS_PRIVATE_KEY: ${{ secrets.PRIVATE_KEY != '' }}
           HAS_DFNS_AUTH_TOKEN: ${{ secrets.DFNS_AUTH_TOKEN != '' }}
           HAS_DFNS_CRED_ID: ${{ secrets.DFNS_CRED_ID != '' }}
           HAS_DFNS_PRIVATE_KEY: ${{ secrets.DFNS_PRIVATE_KEY != '' }}
-          HAS_TESTNET_RPC: ${{ secrets.SEPOLIA_DEPLOYMENT_RPC_URL != '' }}
-          HAS_MAINNET_RPC: ${{ secrets.MAINNET_DEPLOYMENT_RPC_URL != '' }}
+          HAS_DFNS_WALLET_ID: ${{ secrets.DFNS_DEPLOYER_WALLET_ID != '' }}
+          HAS_RPC: ${{ secrets.DEPLOYMENT_RPC_URL != '' }}
         run: |
-          if [ "$NETWORK" = "mainnet" ]; then
-            rpc_present="$HAS_MAINNET_RPC"; rpc_secret="MAINNET_DEPLOYMENT_RPC_URL"
-          else
-            rpc_present="$HAS_TESTNET_RPC"; rpc_secret="SEPOLIA_DEPLOYMENT_RPC_URL"
-          fi
           dfns_complete=false
-          if [ "$HAS_DFNS_AUTH_TOKEN" = "true" ] && [ "$HAS_DFNS_CRED_ID" = "true" ] && [ "$HAS_DFNS_PRIVATE_KEY" = "true" ]; then
+          if [ "$HAS_DFNS_AUTH_TOKEN" = "true" ] && [ "$HAS_DFNS_CRED_ID" = "true" ] && [ "$HAS_DFNS_PRIVATE_KEY" = "true" ] && [ "$HAS_DFNS_WALLET_ID" = "true" ]; then
             dfns_complete=true
           fi
           if [ "$dfns_complete" != "true" ] && [ "$HAS_PRIVATE_KEY" != "true" ]; then
-            echo "::error::refusing to deploy without a signer: set the DFNS auth secrets (DFNS_AUTH_TOKEN, DFNS_CRED_ID, DFNS_PRIVATE_KEY) or PRIVATE_KEY in the ${NETWORK}-deploy environment"
+            echo "::error::refusing to deploy without a signer: set the DFNS secrets (DFNS_AUTH_TOKEN, DFNS_CRED_ID, DFNS_PRIVATE_KEY, DFNS_DEPLOYER_WALLET_ID) or PRIVATE_KEY in the ${TIER}-${NETWORK}-deploy environment"
             exit 1
           fi
-          if [ "$rpc_present" != "true" ]; then
-            echo "::error::missing ${rpc_secret} in the ${NETWORK}-deploy environment"
+          if [ "$HAS_RPC" != "true" ]; then
+            echo "::error::missing DEPLOYMENT_RPC_URL in the ${TIER}-${NETWORK}-deploy environment"
             exit 1
           fi
 
       # --- Setup (copied from contracts-confidential-wrapper-tests.yml) -----
-      # TODO: remove once GitHub runner images ship the CVE-2026-31431 kernel fix
+      # TODO: remove once runner images ship the CVE-2026-31431 kernel fix
       - name: Workaround CVE-2026-31431 (copy.fail)
         run: |
           echo "install algif_aead /bin/false" | sudo tee /etc/modprobe.d/disable-algif-aead.conf
@@ -146,22 +134,26 @@ jobs:
         run: npm ci
 
       # --- Deploy pipeline -------------------------------------------------
-      - name: Check params file exists
+      - name: Check params entry exists
+        # Fail fast (before the expensive compile) if wrappers.json has no entry for this
+        # underlying (checksum-insensitive). Args passed as argv, never interpolated. Deploy re-validates.
         run: |
-          PARAMS_FILE="deploy-params/${NETWORK}/${WRAPPER}.json"
-          if [ ! -f "$PARAMS_FILE" ]; then
-            echo "::error::params file $PARAMS_FILE not found — add it under deploy-params/ and merge before deploying"
-            exit 1
-          fi
-          echo "Using $PARAMS_FILE"
+          node -e '
+            const fs = require("fs");
+            const [tier, network, underlying] = [process.argv[1], process.argv[2], process.argv[3].toLowerCase()];
+            const file = `deploy-params/${tier}/${network}/wrappers.json`;
+            if (!fs.existsSync(file)) { console.error(`::error::${file} not found — add it and merge before deploying`); process.exit(1); }
+            const entries = JSON.parse(fs.readFileSync(file, "utf8"));
+            const key = Object.keys(entries).find(k => k.toLowerCase() === underlying);
+            if (!key) { console.error(`::error::${file} has no entry for underlying ${underlying} — add it and merge before deploying`); process.exit(1); }
+            console.log(`Using ${file} → ${key}`);
+          ' "$TIER" "$NETWORK" "$UNDERLYING"
 
       - name: Compile
         run: npx hardhat compile
 
-      # Resolve the deployer address. task:printDeployerAddress returns the DFNS wallet
-      # address when DFNS is configured, else the address derived from PRIVATE_KEY. It
-      # makes no RPC call and writes `address=<addr>` to $GITHUB_OUTPUT for downstream
-      # steps.
+      # Resolve the deployer address (DFNS wallet or PRIVATE_KEY-derived). No RPC call; writes
+      # `address=<addr>` to $GITHUB_OUTPUT for downstream steps.
       - name: Resolve deployer address
         id: signer
         env:
@@ -169,22 +161,21 @@ jobs:
           DFNS_AUTH_TOKEN: ${{ secrets.DFNS_AUTH_TOKEN }}
           DFNS_CRED_ID: ${{ secrets.DFNS_CRED_ID }}
           DFNS_PRIVATE_KEY: ${{ secrets.DFNS_PRIVATE_KEY }}
+          DFNS_DEPLOYER_WALLET_ID: ${{ secrets.DFNS_DEPLOYER_WALLET_ID }}
         run: npx hardhat task:printDeployerAddress --network "$NETWORK"
 
       - name: Preflight
         env:
-          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.SEPOLIA_DEPLOYMENT_RPC_URL || '' }}
-          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.MAINNET_DEPLOYMENT_RPC_URL || '' }}
+          DEPLOYMENT_RPC_URL: ${{ secrets.DEPLOYMENT_RPC_URL }}
           FORCE_REDEPLOY: ${{ inputs.force_redeploy }}
           DEPLOYER_ADDRESS: ${{ steps.signer.outputs.address }}
         run: |
           npx hardhat task:preflightConfidentialWrapper \
-            --params-file "deploy-params/${NETWORK}/${WRAPPER}.json" \
+            --underlying "$UNDERLYING" \
             --deployer-address "$DEPLOYER_ADDRESS" \
             --network "$NETWORK"
 
-      # Broadcast the deploy. Uses DFNS custody when configured, else the PRIVATE_KEY
-      # signer. RPC is needed for gas estimation + receipts.
+      # Broadcast the deploy (DFNS custody or PRIVATE_KEY). RPC needed for gas estimation + receipts.
       - name: Deploy
         id: deploy
         env:
@@ -192,11 +183,11 @@ jobs:
           DFNS_AUTH_TOKEN: ${{ secrets.DFNS_AUTH_TOKEN }}
           DFNS_CRED_ID: ${{ secrets.DFNS_CRED_ID }}
           DFNS_PRIVATE_KEY: ${{ secrets.DFNS_PRIVATE_KEY }}
-          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.SEPOLIA_DEPLOYMENT_RPC_URL || '' }}
-          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.MAINNET_DEPLOYMENT_RPC_URL || '' }}
+          DFNS_DEPLOYER_WALLET_ID: ${{ secrets.DFNS_DEPLOYER_WALLET_ID }}
+          DEPLOYMENT_RPC_URL: ${{ secrets.DEPLOYMENT_RPC_URL }}
         run: |
           npx hardhat task:deployConfidentialWrapperFromParams \
-            --params-file "deploy-params/${NETWORK}/${WRAPPER}.json" \
+            --underlying "$UNDERLYING" \
             --network "$NETWORK"
           echo "deployed=true" >> "$GITHUB_OUTPUT"
 
@@ -205,17 +196,18 @@ jobs:
         continue-on-error: true
         env:
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
-          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.SEPOLIA_DEPLOYMENT_RPC_URL || '' }}
-          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.MAINNET_DEPLOYMENT_RPC_URL || '' }}
+          DEPLOYMENT_RPC_URL: ${{ secrets.DEPLOYMENT_RPC_URL }}
         run: |
-          PARAMS_FILE="deploy-params/${NETWORK}/${WRAPPER}.json"
-          # Proxy artifact name contains spaces/parens — read it in Node.
-          PROXY=$(node -e "const p=require('./'+process.argv[1]);const d=require('./deployments/'+process.argv[2]+'/ConfidentialWrapper_'+p.name+'_Proxy.json');process.stdout.write(d.address)" "$PARAMS_FILE" "$NETWORK")
+          # The deploy step emits the proxy address, so we never reconstruct the artifact name.
+          PROXY="${{ steps.deploy.outputs.proxy }}"
+          if [ -z "$PROXY" ]; then
+            echo "::warning::no proxy address from the deploy step; skipping verification"
+            exit 0
+          fi
           echo "Proxy address: $PROXY"
-          # An empty key drops hardhat-verify to Etherscan's unauthenticated ~3/sec
-          # tier, which retries cannot beat.
+          # An empty key drops hardhat-verify to Etherscan's ~3/sec unauthenticated tier.
           if [ -z "${ETHERSCAN_API_KEY:-}" ]; then
-            echo "::warning::ETHERSCAN_API_KEY is empty in the ${NETWORK}-deploy environment; verification will likely be rate-limited. Deploy is unaffected."
+            echo "::warning::ETHERSCAN_API_KEY is empty in the ${TIER}-${NETWORK}-deploy environment; verification will likely be rate-limited. Deploy is unaffected."
           fi
           # Minimal retry around Etherscan indexing lag: 10s increments capped at 30s.
           for attempt in 1 2 3 4 5; do
@@ -245,11 +237,10 @@ jobs:
         id: postcheck
         continue-on-error: true
         env:
-          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.SEPOLIA_DEPLOYMENT_RPC_URL || '' }}
-          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.MAINNET_DEPLOYMENT_RPC_URL || '' }}
+          DEPLOYMENT_RPC_URL: ${{ secrets.DEPLOYMENT_RPC_URL }}
         run: |
           npx hardhat task:reportConfidentialWrapper \
-            --params-file "deploy-params/${NETWORK}/${WRAPPER}.json" \
+            --underlying "$UNDERLYING" \
             --out deploy-log.json \
             --strict \
             --network "$NETWORK"
@@ -258,13 +249,12 @@ jobs:
         # Only after setup completed — pre-checkout guard failures have no state.
         if: ${{ always() && steps.deps.outcome == 'success' }}
         env:
-          SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.SEPOLIA_DEPLOYMENT_RPC_URL || '' }}
-          MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.MAINNET_DEPLOYMENT_RPC_URL || '' }}
+          DEPLOYMENT_RPC_URL: ${{ secrets.DEPLOYMENT_RPC_URL }}
         run: |
           # Ensure a deploy-log + summary exists even when an earlier step failed.
           if [ ! -f deploy-log.json ]; then
             npx hardhat task:reportConfidentialWrapper \
-              --params-file "deploy-params/${NETWORK}/${WRAPPER}.json" \
+              --underlying "$UNDERLYING" \
               --out deploy-log.json \
               --network "$NETWORK" || echo "reporter could not run (nothing deployed yet)"
           fi
@@ -285,7 +275,7 @@ jobs:
         if: ${{ always() && steps.deps.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: wrapper-deploy-${{ inputs.network }}-${{ inputs.wrapper }}-${{ github.run_id }}
+          name: wrapper-deploy-${{ inputs.tier }}-${{ inputs.network }}-${{ inputs.underlying }}-${{ github.run_id }}
           retention-days: 90
           include-hidden-files: true
           if-no-files-found: warn
@@ -307,8 +297,8 @@ jobs:
   open-state-pr:
     name: open-state-pr
     needs: deploy
-    # Runs even when verify/postcheck failed (deploy job may be red): persisting
-    # the OZ manifest + proxy artifact is what makes recovery possible.
+    # Runs even when verify/postcheck failed: persisting the OZ manifest + proxy artifact is what
+    # makes recovery possible.
     if: ${{ !cancelled() && needs.deploy.outputs.deployed == 'true' }}
     runs-on: ubuntu-latest
     permissions:
@@ -323,7 +313,7 @@ jobs:
       - name: Download deploy artifacts onto the tree
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: wrapper-deploy-${{ inputs.network }}-${{ inputs.wrapper }}-${{ github.run_id }}
+          name: wrapper-deploy-${{ inputs.tier }}-${{ inputs.network }}-${{ inputs.underlying }}-${{ github.run_id }}
           path: contracts/confidential-wrapper
 
       - name: Open state PR
@@ -332,16 +322,16 @@ jobs:
           add-paths: |
             contracts/confidential-wrapper/deployments/**
             contracts/confidential-wrapper/.openzeppelin/*.json
-          branch: deploy/wrapper-${{ inputs.network }}-${{ inputs.wrapper }}-${{ github.run_id }}
+          branch: deploy/wrapper-${{ inputs.tier }}-${{ inputs.network }}-${{ inputs.underlying }}-${{ github.run_id }}
           base: main
-          commit-message: 'chore: persist ${{ inputs.wrapper }} deploy state (${{ inputs.network }})'
-          title: 'chore: persist ${{ inputs.wrapper }} deploy state (${{ inputs.network }})'
+          commit-message: 'chore: persist ${{ inputs.underlying }} deploy state (${{ inputs.tier }}/${{ inputs.network }})'
+          title: 'chore: persist ${{ inputs.underlying }} deploy state (${{ inputs.tier }}/${{ inputs.network }})'
           body: |
             Automated deployment-state commit from run
             [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
 
             Persists the OpenZeppelin manifest and `hardhat-deploy` artifacts for the
-            `${{ inputs.wrapper }}` wrapper on `${{ inputs.network }}` so the next
+            `${{ inputs.underlying }}` wrapper on `${{ inputs.tier }}/${{ inputs.network }}` so the next
             deploy run starts from committed state and can reuse the implementation.
 
             ⚠️ The wrapper is not active until the Protocol DAO registers it — see the

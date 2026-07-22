@@ -3,7 +3,7 @@
  * canonical 64-char lines. It only rewraps whitespace, never key material — verified
  * here against the two common manglings (escaped `\n` and space-collapsed).
  */
-import { normalizePem } from '../../tasks/dfns/auth';
+import { normalizePem } from '../../tasks/utils/dfns/auth';
 import { expect } from 'chai';
 
 const CANONICAL = '-----BEGIN PRIVATE KEY-----\nAAAABBBB\n-----END PRIVATE KEY-----\n';

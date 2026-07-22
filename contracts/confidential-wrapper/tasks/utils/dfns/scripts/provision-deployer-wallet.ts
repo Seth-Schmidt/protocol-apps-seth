@@ -1,27 +1,26 @@
 /**
  * Provision the DFNS deployer wallet for the confidential-wrapper deploy pipeline.
  *
- * Print-only: no `gh secret` push and no 1Password. You paste the printed wallet id
- * into `deploy-params/networks.json` (`dfnsDeployerWalletId`) via a normal PR — the id
- * maps to a public address and is not a secret. Needs only the DFNS auth credentials
- * (DFNS_AUTH_TOKEN / DFNS_CRED_ID / DFNS_PRIVATE_KEY); never the blockchain key.
+ * Print-only: set the printed wallet id as `DFNS_DEPLOYER_WALLET_ID` in the
+ * `<tier>-<network>-deploy` environment (and local `.env`) — the id maps to a public address and
+ * is not sensitive. Needs only the DFNS auth credentials, never the blockchain key.
  *
- * Idempotent: an existing Active wallet named `confidential-wrapper-deployer` on the
- * network is reused, so re-running is a safe no-op that just re-prints the ids.
+ * Idempotent: an existing Active `confidential-wrapper-deployer` wallet is reused, so re-running
+ * just re-prints the ids.
  *
- *   Run:  npx ts-node tasks/dfns/scripts/provision-deployer-wallet.ts [--network testnet|mainnet]
+ *   Run:  npx ts-node tasks/utils/dfns/scripts/provision-deployer-wallet.ts [--network sepolia|ethereum]
  *   (omit --network to provision both)
  */
 import { dfnsApiClient, loadDfnsAuth } from '../auth';
 
-// DFNS network names are narrower than the SDK's full union so `createWallet` keeps
-// the literal type. Each maps to the deploy-params/networks.json network key.
-type Target = { networkKey: 'testnet' | 'mainnet'; dfnsNetwork: 'Ethereum' | 'EthereumSepolia' };
+// DFNS network names are narrower than the SDK's union so `createWallet` keeps the literal type.
+// networkKey is the Hardhat network whose <tier>-<network>-deploy env gets the printed wallet id.
+type Target = { networkKey: 'sepolia' | 'ethereum'; dfnsNetwork: 'Ethereum' | 'EthereumSepolia' };
 
 const WALLET_NAME = 'confidential-wrapper-deployer';
 const TARGETS: Target[] = [
-  { networkKey: 'testnet', dfnsNetwork: 'EthereumSepolia' },
-  { networkKey: 'mainnet', dfnsNetwork: 'Ethereum' },
+  { networkKey: 'sepolia', dfnsNetwork: 'EthereumSepolia' },
+  { networkKey: 'ethereum', dfnsNetwork: 'Ethereum' },
 ];
 
 function parseTargets(argv: string[]): Target[] {
@@ -65,12 +64,13 @@ async function main(): Promise<void> {
     }),
   );
 
-  console.log('\nDeployer wallets provisioned. Commit these ids into deploy-params/networks.json:');
+  console.log('\nDeployer wallets provisioned. Set each id as DFNS_DEPLOYER_WALLET_ID in the');
+  console.log('matching <tier>-<network>-deploy environment (and your local .env):');
   for (const p of provisioned) {
-    console.log(`  ${p.networkKey}: "dfnsDeployerWalletId": "${p.walletId}"   (address ${p.address})`);
+    console.log(`  ${p.networkKey}: DFNS_DEPLOYER_WALLET_ID="${p.walletId}"   (address ${p.address})`);
   }
   console.log('\nThen fund each address with gas before deploying, and set the DFNS auth secrets');
-  console.log('(DFNS_AUTH_TOKEN / DFNS_CRED_ID / DFNS_PRIVATE_KEY) in the <network>-deploy environment.');
+  console.log('(DFNS_AUTH_TOKEN / DFNS_CRED_ID / DFNS_PRIVATE_KEY) in the <tier>-<network>-deploy environment.');
 }
 
 main().catch((err: unknown) => {

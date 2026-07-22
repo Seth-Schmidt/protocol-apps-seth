@@ -72,7 +72,7 @@
     "test": "hardhat test",
     "test:sepolia": "hardhat test --network sepolia",
     "test:dfns": "mocha -r ts-node/register 'test/dfns/**/*.test.ts'",
-    "dfns:provision": "ts-node tasks/dfns/scripts/provision-deployer-wallet.ts"
+    "dfns:provision": "ts-node tasks/utils/dfns/scripts/provision-deployer-wallet.ts"
   },
   "overrides": {
     "@fhevm/solidity": "0.11.1",

@@ -57,7 +57,7 @@ Populate `.env`. V1 only takes the five constructor inputs (no blocked-users or 
 ```dotenv
 # Auth
 MNEMONIC=                          # or PRIVATE_KEY=
-MAINNET_RPC_URL=
+ETHEREUM_RPC_URL=
 ETHERSCAN_API_KEY=
 
 NUM_CONFIDENTIAL_WRAPPERS=N
@@ -73,7 +73,7 @@ CONFIDENTIAL_WRAPPER_OWNER_ADDRESS_{i}=
 **Batch (recommended when deploying multiple wrappers):**
 
 ```bash
-npx hardhat task:deployAllConfidentialWrappers --network mainnet
+npx hardhat task:deployAllConfidentialWrappers --network ethereum
 ```
 
 **Single wrapper:**
@@ -85,7 +85,7 @@ npx hardhat task:deployConfidentialWrapper \
   --contract-uri 'data:application/json;utf8,{"name":"Confidential USDT","symbol":"cUSDT","description":"Confidential wrapper of USDT"}' \
   --underlying 0xdAC17F958D2ee523a2206206994597C13D831ec7 \
   --owner 0xB6D69D5F334d8B97B194617B53c6aB62f8681Ef3 \
-  --network mainnet
+  --network ethereum
 ```
 
 Record the proxy address for every wrapper.
@@ -97,7 +97,7 @@ This verifies both the proxy and the V1 implementation. See the note in the main
 **Batch:**
 
 ```bash
-npx hardhat task:verifyAllConfidentialWrappers --network mainnet
+npx hardhat task:verifyAllConfidentialWrappers --network ethereum
 ```
 
 **Single:**
@@ -105,7 +105,7 @@ npx hardhat task:verifyAllConfidentialWrappers --network mainnet
 ```bash
 npx hardhat task:verifyConfidentialWrapper \
   --proxy-address <PROXY_ADDRESS> \
-  --network mainnet
+  --network ethereum
 ```
 
 ## Step 4 — Submit the combined DAO proposal
@@ -139,4 +139,4 @@ See the [Creating Ethereum Proposals](../governance/creating-proposals-ethereum.
 
 ## Step 5 — Update the addresses directory
 
-Same as [Option 1 Step 5](./deploy-wrapper-runbook.md#step-5--update-the-addresses-directory).
+Same as [Option 1 Step 3](./deploy-wrapper-runbook.md#step-3--record-addresses).
