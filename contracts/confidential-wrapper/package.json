@@ -25,6 +25,8 @@
     "@openzeppelin/confidential-contracts": "^0.4.0"
   },
   "devDependencies": {
+    "@dfns/sdk": "0.8.21",
+    "@dfns/sdk-keysigner": "0.8.21",
     "@fhevm/hardhat-plugin": "0.4.2",
     "@fhevm/mock-utils": "0.4.2",
     "@zama-fhe/relayer-sdk": "0.4.1",
@@ -68,7 +70,9 @@
     "prettier:check": "prettier --check \"**/*.{js,json,md,sol,ts,yml}\"",
     "prettier:write": "prettier --write \"**/*.{js,json,md,sol,ts,yml}\"",
     "test": "hardhat test",
-    "test:sepolia": "hardhat test --network sepolia"
+    "test:sepolia": "hardhat test --network sepolia",
+    "test:dfns": "mocha -r ts-node/register 'test/dfns/**/*.test.ts'",
+    "dfns:provision": "ts-node tasks/dfns/scripts/provision-deployer-wallet.ts"
   },
   "overrides": {
     "@fhevm/solidity": "0.11.1",

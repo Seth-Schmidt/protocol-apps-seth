@@ -1,8 +1,37 @@
+import { isDfnsConfigured, loadDfnsDeployerSigner, resolveDfnsDeployerAddress } from './dfns';
 import { getRequiredEnvVar } from './utils/loadVariables';
+import { Signer, Wallet } from 'ethers';
+import { appendFileSync } from 'fs';
 import { task, types } from 'hardhat/config';
 import { HardhatRuntimeEnvironment } from 'hardhat/types';
 
 export const CONTRACT_NAME = 'ConfidentialWrapper';
+
+// Select the deploy signer: DFNS custody when configured (auth secrets + a committed
+// dfnsDeployerWalletId for the network), else the local PRIVATE_KEY/MNEMONIC signer
+// from the Hardhat network `accounts`. Both are ethers signers, so OZ deployProxy
+// (which reuses getSigner(factory.runner)) routes impl + proxy through whichever one.
+export async function getDeployerSigner(hre: HardhatRuntimeEnvironment): Promise<Signer> {
+  if (isDfnsConfigured(hre)) {
+    return loadDfnsDeployerSigner(hre);
+  }
+  const { deployer } = await hre.getNamedAccounts();
+  return hre.ethers.getSigner(deployer);
+}
+
+// Resolve the deployer ADDRESS without an RPC round-trip — the workflow's "resolve
+// deployer address" step runs before RPC secrets are in scope. DFNS uses a read-only
+// API call; the local path derives the address from the signing key directly.
+export async function resolveDeployerAddress(hre: HardhatRuntimeEnvironment): Promise<string> {
+  if (isDfnsConfigured(hre)) {
+    return resolveDfnsDeployerAddress(hre);
+  }
+  const privateKey = process.env.PRIVATE_KEY;
+  if (privateKey) return new Wallet(privateKey).address;
+  const mnemonic = process.env.MNEMONIC;
+  if (mnemonic) return Wallet.fromPhrase(mnemonic).address;
+  throw new Error('No signer configured: set the DFNS auth secrets + dfnsDeployerWalletId, or PRIVATE_KEY/MNEMONIC');
+}
 
 // Get the deployment name for a confidential wrapper
 export function getConfidentialWrapperName(tokenName: string): string {
@@ -43,9 +72,10 @@ function getRequiredBooleanEnvVar(name: string): boolean {
 
 // Deploy a confidential wrapper contract as a function
 async function deployConfidentialWrapper(initConfig: ConfidentialWrapperInitConfig, hre: HardhatRuntimeEnvironment) {
-  const { ethers, upgrades, deployments, getNamedAccounts } = hre;
+  const { ethers, upgrades, deployments } = hre;
   const { save, getArtifact } = deployments;
-  const { deployer } = await getNamedAccounts();
+  const signer = await getDeployerSigner(hre);
+  const deployer = await signer.getAddress();
   const {
     name,
     symbol,
@@ -57,8 +87,9 @@ async function deployConfidentialWrapper(initConfig: ConfidentialWrapperInitConf
     hasUnderlyingDenyListSelector,
   } = initConfig;
 
-  // Deploy the proxy contract
-  const confidentialWrapperFactory = await ethers.getContractFactory(CONTRACT_NAME);
+  // Deploy the proxy contract. Connecting the factory to `signer` makes OZ
+  // deployProxy route both the implementation and proxy deploy through it.
+  const confidentialWrapperFactory = await ethers.getContractFactory(CONTRACT_NAME, signer);
   const proxy = await upgrades.deployProxy(
     confidentialWrapperFactory,
     [
@@ -211,10 +242,10 @@ task('task:deployAllConfidentialWrappers').setAction(async function (_, hre) {
 // Example usage:
 // npx hardhat task:deployConfidentialWrapperImpl --network testnet
 async function deployConfidentialWrapperImpl(hre: HardhatRuntimeEnvironment) {
-  const { getNamedAccounts, ethers, deployments, network } = hre;
+  const { ethers, deployments, network } = hre;
   const { save, getArtifact } = deployments;
-  const { deployer } = await getNamedAccounts();
-  const deployerSigner = await ethers.getSigner(deployer);
+  const deployerSigner = await getDeployerSigner(hre);
+  const deployer = await deployerSigner.getAddress();
 
   const factory = await ethers.getContractFactory(CONTRACT_NAME, deployerSigner);
   const implementation = await factory.deploy();
@@ -250,3 +281,16 @@ task('task:verifyConfidentialWrapperImpl')
     console.log(`Verifying ${CONTRACT_NAME} implementation at ${implAddress}...\n`);
     await run('verify:verify', { address: implAddress, constructorArguments: [] });
   });
+
+// Print the deployer address for the active network — the DFNS wallet address when
+// DFNS is configured, else the address derived from the local signing key. This is
+// the deploy workflow's "resolve deployer address" (DFNS swap point 1) and makes no
+// RPC call. Writes `address=<addr>` to $GITHUB_OUTPUT when present so the value is
+// captured cleanly regardless of any surrounding stdout.
+task('task:printDeployerAddress').setAction(async function (_, hre) {
+  const address = await resolveDeployerAddress(hre);
+  console.log(`Deployer address: ${address}`);
+  if (process.env.GITHUB_OUTPUT) {
+    appendFileSync(process.env.GITHUB_OUTPUT, `address=${address}\n`);
+  }
+});
