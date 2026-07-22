@@ -17,7 +17,7 @@ Before starting, collect the following for each wrapper being deployed:
 | Denylist function selector (`bytes4`) | Underlying token contract ABI. Use `0x00000000` and `false` if the underlying has no denylist |
 | Initial blocked-users list (JSON array) | Compliance / legal. Use `'[]'` if none |
 | Contract URI JSON metadata | Follow the pattern `data:application/json;utf8,{"name":"...","symbol":"...","description":"..."}` |
-| `MNEMONIC` or `PRIVATE_KEY` for the deployer | DFNS / internal secrets |
+| Deployer signer — DFNS custody (`DFNS_AUTH_TOKEN` / `DFNS_CRED_ID` / `DFNS_PRIVATE_KEY` + a `dfnsDeployerWalletId` in `networks.json`), or a local `MNEMONIC` / `PRIVATE_KEY` fallback | DFNS console / internal secrets. See [DFNS custody signing](#dfns-custody-signing) |
 | `ETHERSCAN_API_KEY` | Etherscan dashboard |
 | RPC URL for the target network | Infura / Alchemy / internal node / public endpoint |
 
@@ -60,6 +60,45 @@ Within a batch run, all proxies share the same implementation. The deploy task r
 
 ---
 
+## DFNS custody signing
+
+Deploys can sign through **DFNS MPC custody** so the deployer key never leaves DFNS. The
+signing path activates when the three DFNS auth secrets are set **and** the target network
+has a `dfnsDeployerWalletId` in
+[`deploy-params/networks.json`](../../contracts/confidential-wrapper/deploy-params/networks.json);
+otherwise the pipeline falls back to the local `MNEMONIC` / `PRIVATE_KEY` signer, so DFNS is
+not required to deploy with a raw key.
+
+**What is / isn't a secret**
+
+| Value | Kind | Where it lives |
+| --- | --- | --- |
+| `DFNS_AUTH_TOKEN`, `DFNS_CRED_ID`, `DFNS_PRIVATE_KEY` | Secret | `<network>-deploy` GitHub Environment (admin sets once) |
+| `dfnsDeployerWalletId` | **Not a secret** (maps to a public address) | committed in `deploy-params/networks.json` |
+
+The DFNS service account needs `Wallets:GetWallet` + `Wallets:BroadcastTransaction` (and
+`Wallets:CreateWallet` / `Wallets:ListWallets` for provisioning) — **not** the raw
+`generateSignature` permission.
+
+**One-time setup**
+
+1. Provision the deployer wallet (needs only the DFNS auth secrets in your env):
+   ```bash
+   npm run dfns:provision -- --network testnet   # or mainnet; omit --network for both
+   ```
+2. Paste the printed wallet id into `deploy-params/networks.json` (`dfnsDeployerWalletId`)
+   via a PR, and fund the printed address above `minDeployerBalanceWei`.
+3. Set `DFNS_AUTH_TOKEN` / `DFNS_CRED_ID` / `DFNS_PRIVATE_KEY` in the `<network>-deploy`
+   GitHub Environment.
+
+The workflow uses DFNS at two points: **resolve deployer address**
+(`task:printDeployerAddress` — a read-only DFNS call, no RPC) and **deploy**
+(`upgrades.deployProxy` routed through the `DfnsSigner`, which broadcasts via DFNS
+`BroadcastTransaction`). Both fall back to the `PRIVATE_KEY` signer when DFNS is not
+configured.
+
+---
+
 Pick the option that matches your task:
 
 - **Option 1 — Fresh wrapper contract deployment**: a new token is being wrapped for the first time. Deploys a proxy (and implementation, if none exists), verifies, then registers the wrapper.
@@ -90,7 +129,7 @@ The standard fresh deploy (proxy + implementation at repo `HEAD`, verify, emit D
 
 The workflow already verifies the wrapper on Etherscan, so skip Path B and continue to **Step 2** below.
 
-> **Operator setup (one-time, GitHub admin):** create the `testnet-deploy` / `mainnet-deploy` environments with required reviewers (enable "prevent self-review") and a deployment-branch policy of `main` only; add environment secrets `PRIVATE_KEY` (a dedicated per-network deployer), `SEPOLIA_DEPLOYMENT_RPC_URL` for `testnet-deploy` or `MAINNET_DEPLOYMENT_RPC_URL` for `mainnet-deploy`, and `ETHERSCAN_API_KEY`; fund the deployer wallets above `minDeployerBalanceWei`; and enable repo Actions setting "Allow GitHub Actions to create and approve pull requests" (the state-PR job needs it).
+> **Operator setup (one-time, GitHub admin):** create the `testnet-deploy` / `mainnet-deploy` environments with required reviewers (enable "prevent self-review") and a deployment-branch policy of `main` only; add the **signer** secrets — either the DFNS auth trio `DFNS_AUTH_TOKEN` / `DFNS_CRED_ID` / `DFNS_PRIVATE_KEY` (see [DFNS custody signing](#dfns-custody-signing)) **or** a dedicated per-network `PRIVATE_KEY` — plus `SEPOLIA_DEPLOYMENT_RPC_URL` for `testnet-deploy` or `MAINNET_DEPLOYMENT_RPC_URL` for `mainnet-deploy`, and `ETHERSCAN_API_KEY`; fund the deployer wallets above `minDeployerBalanceWei`; and enable repo Actions setting "Allow GitHub Actions to create and approve pull requests" (the state-PR job needs it).
 
 #### Path B — Manual deployment
 

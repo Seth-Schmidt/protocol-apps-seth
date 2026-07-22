@@ -4,13 +4,15 @@
     "ozManifest": "sepolia.json",
     "dao": "0x998301B557b9f2B27cb4f2CB16035e6f4b09EACf",
     "registry": "0x2f0750Bbb0A246059d80e94c454586a7F27a128e",
-    "minDeployerBalanceWei": "20000000000000000"
+    "minDeployerBalanceWei": "20000000000000000",
+    "dfnsDeployerWalletId": "wa-01ju5-90hri-e80r82m21ontf9bm"
   },
   "mainnet": {
     "chainId": 1,
     "ozManifest": "mainnet.json",
     "dao": "0xB6D69D5F334d8B97B194617B53c6aB62f8681Ef3",
     "registry": "0xeb5015fF021DB115aCe010f23F55C2591059bBA0",
-    "minDeployerBalanceWei": "150000000000000000"
+    "minDeployerBalanceWei": "150000000000000000",
+    "dfnsDeployerWalletId": ""
   }
 }

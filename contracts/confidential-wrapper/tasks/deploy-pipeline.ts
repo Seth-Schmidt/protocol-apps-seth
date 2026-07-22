@@ -1,4 +1,4 @@
-import { CONTRACT_NAME, getConfidentialWrapperProxyName } from './deploy';
+import { CONTRACT_NAME, getConfidentialWrapperProxyName, resolveDeployerAddress } from './deploy';
 import { getVersion, Manifest } from '@openzeppelin/upgrades-core';
 import { execSync } from 'child_process';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'fs';
@@ -126,6 +126,21 @@ async function reportImplReuse(hre: HardhatRuntimeEnvironment): Promise<string> 
     return `could not determine (will be decided at deploy time): ${(err as Error).message}`;
   }
 }
+
+// ---------------------------------------------------------------------------
+// task:printDeployerAddress
+// Prints the deployer address for the active network — the DFNS wallet address when
+// DFNS is configured, else derived from the local signing key. Makes no RPC call, and
+// writes `address=<addr>` to $GITHUB_OUTPUT when present so the workflow captures it
+// cleanly regardless of surrounding stdout.
+// ---------------------------------------------------------------------------
+task('task:printDeployerAddress').setAction(async function (_, hre) {
+  const address = await resolveDeployerAddress(hre);
+  console.log(`Deployer address: ${address}`);
+  if (process.env.GITHUB_OUTPUT) {
+    appendFileSync(process.env.GITHUB_OUTPUT, `address=${address}\n`);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // task:preflightConfidentialWrapper

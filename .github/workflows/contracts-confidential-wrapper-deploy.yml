@@ -6,9 +6,13 @@
 #     the approved job.
 #   - Environment deployment-branch policy = main only, so the approved run can
 #     only execute reviewed workflow code.
-#   - PRIVATE_KEY is exposed as step-level env on exactly two steps (resolve
-#     deployer address + deploy) — never job-level, never GITHUB_ENV. Those two
-#     steps are the future DFNS swap points.
+#   - Signing is DFNS MPC custody when the DFNS auth secrets are set AND the network
+#     has a committed dfnsDeployerWalletId (deploy-params/networks.json); otherwise it
+#     falls back to PRIVATE_KEY. The signing secrets (DFNS_AUTH_TOKEN / DFNS_CRED_ID /
+#     DFNS_PRIVATE_KEY and PRIVATE_KEY) are exposed as step-level env on exactly two
+#     steps (resolve deployer address + deploy) — never job-level, never GITHUB_ENV.
+#     The DFNS wallet id is NOT a secret (it maps to a public address) and lives in
+#     committed config, not in the environment.
 #   - Deployment RPC secrets are mapped to SEPOLIA_RPC_URL / MAINNET_RPC_URL per step only.
 #   - The PR-opening job (contents: write) is separate and never sees PRIVATE_KEY.
 name: contracts-confidential-wrapper-deploy
@@ -86,9 +90,14 @@ jobs:
 
       - name: Guard — signer configured
         # Presence-check the required secrets. Only booleans (`secret != ''`) reach
-        # the runner, so no secret value (PRIVATE_KEY included) is exposed as env.
+        # the runner, so no secret value is exposed as env. Signing is satisfied by
+        # EITHER the DFNS auth trio OR PRIVATE_KEY; the DFNS wallet id is non-secret
+        # config in networks.json, validated later by the deploy task.
         env:
           HAS_PRIVATE_KEY: ${{ secrets.PRIVATE_KEY != '' }}
+          HAS_DFNS_AUTH_TOKEN: ${{ secrets.DFNS_AUTH_TOKEN != '' }}
+          HAS_DFNS_CRED_ID: ${{ secrets.DFNS_CRED_ID != '' }}
+          HAS_DFNS_PRIVATE_KEY: ${{ secrets.DFNS_PRIVATE_KEY != '' }}
           HAS_TESTNET_RPC: ${{ secrets.SEPOLIA_DEPLOYMENT_RPC_URL != '' }}
           HAS_MAINNET_RPC: ${{ secrets.MAINNET_DEPLOYMENT_RPC_URL != '' }}
         run: |
@@ -97,11 +106,16 @@ jobs:
           else
             rpc_present="$HAS_TESTNET_RPC"; rpc_secret="SEPOLIA_DEPLOYMENT_RPC_URL"
           fi
-          missing=()
-          [ "$HAS_PRIVATE_KEY" = "true" ] || missing+=("PRIVATE_KEY")
-          [ "$rpc_present" = "true" ] || missing+=("$rpc_secret")
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "::error::refusing to deploy without a signer: set ${missing[*]} in the ${NETWORK}-deploy environment"
+          dfns_complete=false
+          if [ "$HAS_DFNS_AUTH_TOKEN" = "true" ] && [ "$HAS_DFNS_CRED_ID" = "true" ] && [ "$HAS_DFNS_PRIVATE_KEY" = "true" ]; then
+            dfns_complete=true
+          fi
+          if [ "$dfns_complete" != "true" ] && [ "$HAS_PRIVATE_KEY" != "true" ]; then
+            echo "::error::refusing to deploy without a signer: set the DFNS auth secrets (DFNS_AUTH_TOKEN, DFNS_CRED_ID, DFNS_PRIVATE_KEY) or PRIVATE_KEY in the ${NETWORK}-deploy environment"
+            exit 1
+          fi
+          if [ "$rpc_present" != "true" ]; then
+            echo "::error::missing ${rpc_secret} in the ${NETWORK}-deploy environment"
             exit 1
           fi
 
@@ -144,15 +158,18 @@ jobs:
       - name: Compile
         run: npx hardhat compile
 
-      # DFNS swap point 1: resolve the deployer address from the signing key.
+      # Resolve the deployer address. task:printDeployerAddress returns the DFNS wallet
+      # address when DFNS is configured, else the address derived from PRIVATE_KEY. It
+      # makes no RPC call and writes `address=<addr>` to $GITHUB_OUTPUT for downstream
+      # steps.
       - name: Resolve deployer address
         id: signer
         env:
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-        run: |
-          ADDR=$(node -e "const {ethers}=require('ethers');process.stdout.write(new ethers.Wallet(process.env.PRIVATE_KEY).address)")
-          echo "address=$ADDR" >> "$GITHUB_OUTPUT"
-          echo "Deployer address: $ADDR"
+          DFNS_AUTH_TOKEN: ${{ secrets.DFNS_AUTH_TOKEN }}
+          DFNS_CRED_ID: ${{ secrets.DFNS_CRED_ID }}
+          DFNS_PRIVATE_KEY: ${{ secrets.DFNS_PRIVATE_KEY }}
+        run: npx hardhat task:printDeployerAddress --network "$NETWORK"
 
       - name: Preflight
         env:
@@ -166,11 +183,15 @@ jobs:
             --deployer-address "$DEPLOYER_ADDRESS" \
             --network "$NETWORK"
 
-      # DFNS swap point 2: broadcast the deploy with the signing key.
+      # Broadcast the deploy. Uses DFNS custody when configured, else the PRIVATE_KEY
+      # signer. RPC is needed for gas estimation + receipts.
       - name: Deploy
         id: deploy
         env:
           PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+          DFNS_AUTH_TOKEN: ${{ secrets.DFNS_AUTH_TOKEN }}
+          DFNS_CRED_ID: ${{ secrets.DFNS_CRED_ID }}
+          DFNS_PRIVATE_KEY: ${{ secrets.DFNS_PRIVATE_KEY }}
           SEPOLIA_RPC_URL: ${{ inputs.network == 'testnet' && secrets.SEPOLIA_DEPLOYMENT_RPC_URL || '' }}
           MAINNET_RPC_URL: ${{ inputs.network == 'mainnet' && secrets.MAINNET_DEPLOYMENT_RPC_URL || '' }}
         run: |
