@@ -129,10 +129,10 @@ async function reportImplReuse(hre: HardhatRuntimeEnvironment): Promise<string> 
 
 // ---------------------------------------------------------------------------
 // task:printDeployerAddress
-// CI-only (DFNS swap point 1). Prints the deployer address for the active network —
-// the DFNS wallet address when DFNS is configured, else derived from the local
-// signing key. Makes no RPC call, and writes `address=<addr>` to $GITHUB_OUTPUT when
-// present so the workflow captures it cleanly regardless of surrounding stdout.
+// Prints the deployer address for the active network — the DFNS wallet address when
+// DFNS is configured, else derived from the local signing key. Makes no RPC call, and
+// writes `address=<addr>` to $GITHUB_OUTPUT when present so the workflow captures it
+// cleanly regardless of surrounding stdout.
 // ---------------------------------------------------------------------------
 task('task:printDeployerAddress').setAction(async function (_, hre) {
   const address = await resolveDeployerAddress(hre);

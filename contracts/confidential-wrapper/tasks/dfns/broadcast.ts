@@ -1,7 +1,5 @@
 /**
- * Pure helpers for the DFNS custody send path, ported from confidential-defi's
- * `dfns-provider/src/broadcast.ts` (viem → framework-agnostic). Kept side-effect
- * free so they can be unit-tested without a live DFNS client or chain:
+ * Pure helpers for the DFNS custody send path:
  *
  *  - `eip1559BodyFromTx` maps a resolved transaction to a DFNS `Eip1559` broadcast
  *    body: `from` is dropped (DFNS signs as the wallet), `gas`→`gasLimit`, and any
@@ -41,7 +39,7 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 export type AwaitTxHashOptions = {
   pollMs?: number;
   timeoutMs?: number;
-  // Injectable clock/sleep so the poll loop is unit-testable without real time.
+  // Injectable clock/sleep so the poll is testable without real time.
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
 };

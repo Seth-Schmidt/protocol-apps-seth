@@ -1,12 +1,10 @@
 /**
  * Provision the DFNS deployer wallet for the confidential-wrapper deploy pipeline.
  *
- * Slimmed from confidential-defi's `provision-dfns-wallet.ts`: ONE deployer role, and
- * **print-only** — no `gh secret` push and no 1Password. You paste the printed wallet
- * id into `deploy-params/networks.json` (`dfnsDeployerWalletId`) via a normal PR, so
- * provisioning needs zero repo-admin privilege (the id maps to a public address and
- * is not a secret). Needs only the DFNS auth credentials (DFNS_AUTH_TOKEN /
- * DFNS_CRED_ID / DFNS_PRIVATE_KEY); never the blockchain key.
+ * Print-only: no `gh secret` push and no 1Password. You paste the printed wallet id
+ * into `deploy-params/networks.json` (`dfnsDeployerWalletId`) via a normal PR — the id
+ * maps to a public address and is not a secret. Needs only the DFNS auth credentials
+ * (DFNS_AUTH_TOKEN / DFNS_CRED_ID / DFNS_PRIVATE_KEY); never the blockchain key.
  *
  * Idempotent: an existing Active wallet named `confidential-wrapper-deployer` on the
  * network is reused, so re-running is a safe no-op that just re-prints the ids.

@@ -8,8 +8,7 @@ export const CONTRACT_NAME = 'ConfidentialWrapper';
 
 // Select the deploy signer: DFNS custody when configured (auth secrets + a committed
 // dfnsDeployerWalletId for the network), else the local PRIVATE_KEY/MNEMONIC signer
-// from the Hardhat network `accounts`. Both are ethers signers, so OZ deployProxy
-// (which reuses getSigner(factory.runner)) routes impl + proxy through whichever one.
+// from the Hardhat network `accounts`.
 export async function getDeployerSigner(hre: HardhatRuntimeEnvironment): Promise<Signer> {
   if (isDfnsConfigured(hre)) {
     return loadDfnsDeployerSigner(hre);
@@ -18,9 +17,8 @@ export async function getDeployerSigner(hre: HardhatRuntimeEnvironment): Promise
   return hre.ethers.getSigner(deployer);
 }
 
-// Resolve the deployer ADDRESS without an RPC round-trip — the workflow's "resolve
-// deployer address" step runs before RPC secrets are in scope. DFNS uses a read-only
-// API call; the local path derives the address from the signing key directly.
+// Resolve the deployer address without an RPC round-trip. DFNS uses a read-only API
+// call; the local path derives the address from the signing key directly.
 export async function resolveDeployerAddress(hre: HardhatRuntimeEnvironment): Promise<string> {
   if (isDfnsConfigured(hre)) {
     return resolveDfnsDeployerAddress(hre);

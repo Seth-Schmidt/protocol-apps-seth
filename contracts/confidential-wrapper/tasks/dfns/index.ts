@@ -21,9 +21,8 @@ export function isDfnsConfigured(hre: HardhatRuntimeEnvironment): boolean {
 }
 
 /**
- * Resolve the DFNS deployer address for the active network. Read-only DFNS API call
- * (`Wallets:GetWallet`) — makes no RPC request, so it works in the "resolve deployer
- * address" workflow step without RPC secrets.
+ * Resolve the DFNS deployer address for the active network via the read-only
+ * `Wallets:GetWallet`. Makes no RPC request.
  */
 export async function resolveDfnsDeployerAddress(hre: HardhatRuntimeEnvironment): Promise<string> {
   const auth = loadDfnsAuth();

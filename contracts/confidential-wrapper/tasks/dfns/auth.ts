@@ -1,12 +1,11 @@
 /**
  * DFNS API authentication for the confidential-wrapper deployer.
  *
- * Ported from confidential-defi's `dfns-provider` (the auth half of its
- * `src/index.ts`). There is NO raw-key path: the blockchain key never leaves DFNS
- * custody. These credentials only authenticate (bearer token) and authorize (a
- * User Action Signature from the credential keypair) API requests. Signing +
- * broadcasting happens inside DFNS via `Wallets:BroadcastTransaction`; service
- * accounts are not granted raw `generateSignature`.
+ * There is no raw-key path: the blockchain key never leaves DFNS custody. These
+ * credentials only authenticate (bearer token) and authorize (a User Action Signature
+ * from the credential keypair) API requests; signing and broadcasting happen inside
+ * DFNS via `Wallets:BroadcastTransaction` (service accounts are not granted raw
+ * `generateSignature`).
  */
 import { createPrivateKey } from 'node:crypto';
 

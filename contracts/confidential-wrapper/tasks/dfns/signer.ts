@@ -1,17 +1,9 @@
 /**
- * `DfnsSigner` — an ethers v6 signer whose blockchain key lives in DFNS custody.
- *
- * This is the ethers analogue of confidential-defi's viem `dfnsBroadcastTransport`:
- * writes are handed to DFNS `Wallets:BroadcastTransaction` (DFNS parses, can enforce
- * recipient policies, then signs AND broadcasts), while reads/gas-estimation go
- * through the ethers `Provider` unchanged. There is no local signing — the service
- * account is not granted raw `generateSignature`, so `signTransaction`/`signMessage`
- * throw.
- *
- * OZ `upgrades.deployProxy` takes `getSigner(ImplFactory.runner)` and reuses that one
- * signer for the implementation deploy, the ERC1967 proxy factory, and initial-owner
- * resolution — so connecting this signer to the ContractFactory routes the entire
- * proxy deploy through DFNS with no plugin changes.
+ * An ethers v6 signer whose blockchain key lives in DFNS custody. Writes are handed
+ * to DFNS `Wallets:BroadcastTransaction` (DFNS parses the transaction, can enforce
+ * recipient policies, then signs and broadcasts); reads and gas estimation go through
+ * the ethers `Provider`. There is no local signing, so `signTransaction`,
+ * `signMessage`, and `signTypedData` throw.
  */
 import { awaitBroadcastTxHash, eip1559BodyFromTx } from './broadcast';
 import type { DfnsApiClient } from '@dfns/sdk';
@@ -52,7 +44,6 @@ export class DfnsSigner extends AbstractSigner {
     return new DfnsSigner(this.#dfns, this.#walletId, this.#address, provider);
   }
 
-  // DFNS custody exposes no raw-signature path to service accounts.
   signTransaction(): Promise<string> {
     throw new Error(`signTransaction ${NOT_SUPPORTED}`);
   }

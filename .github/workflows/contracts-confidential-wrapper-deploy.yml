@@ -158,10 +158,10 @@ jobs:
       - name: Compile
         run: npx hardhat compile
 
-      # DFNS swap point 1: resolve the deployer address. task:printDeployerAddress
-      # returns the DFNS wallet address when DFNS is configured, else the address
-      # derived from PRIVATE_KEY. It makes no RPC call and writes `address=<addr>`
-      # to $GITHUB_OUTPUT for downstream steps.
+      # Resolve the deployer address. task:printDeployerAddress returns the DFNS wallet
+      # address when DFNS is configured, else the address derived from PRIVATE_KEY. It
+      # makes no RPC call and writes `address=<addr>` to $GITHUB_OUTPUT for downstream
+      # steps.
       - name: Resolve deployer address
         id: signer
         env:
@@ -183,8 +183,8 @@ jobs:
             --deployer-address "$DEPLOYER_ADDRESS" \
             --network "$NETWORK"
 
-      # DFNS swap point 2: broadcast the deploy. Uses DFNS custody when configured,
-      # else the PRIVATE_KEY signer. RPC is needed for gas estimation + receipts.
+      # Broadcast the deploy. Uses DFNS custody when configured, else the PRIVATE_KEY
+      # signer. RPC is needed for gas estimation + receipts.
       - name: Deploy
         id: deploy
         env:
