@@ -4,7 +4,7 @@ import { task, types } from 'hardhat/config';
 
 // Verify a confidential wrapper contract
 // Example usage:
-// npx hardhat task:verifyConfidentialWrapper --proxy-address 0x1234567890123456789012345678901234567890 --network testnet
+// npx hardhat task:verifyConfidentialWrapper --proxy-address 0x1234567890123456789012345678901234567890 --network sepolia
 task('task:verifyConfidentialWrapper')
   .addParam('proxyAddress', 'The address of the confidential wrapper proxy contract to verify', '', types.string)
   .setAction(async function ({ proxyAddress }, hre) {
@@ -30,7 +30,7 @@ task('task:verifyConfidentialWrapper')
 // verify one of them. However, since they are proxied, verifying all of them has the benefit of linking
 // the proxies with their implementation on Etherscan.
 // Example usage:
-// npx hardhat task:verifyAllConfidentialWrappers --network testnet
+// npx hardhat task:verifyAllConfidentialWrappers --network sepolia
 task('task:verifyAllConfidentialWrappers').setAction(async function (_, hre) {
   const { run, deployments } = hre;
   const { get } = deployments;
@@ -39,12 +39,12 @@ task('task:verifyAllConfidentialWrappers').setAction(async function (_, hre) {
   const numWrappers = parseInt(getRequiredEnvVar('NUM_CONFIDENTIAL_WRAPPERS'));
 
   for (let i = 0; i < numWrappers; i++) {
-    // Get the name from environment variable
-    const name = getRequiredEnvVar(`CONFIDENTIAL_WRAPPER_NAME_${i}`);
+    // Deployment artifacts are keyed by symbol (see getConfidentialWrapperProxyName).
+    const symbol = getRequiredEnvVar(`CONFIDENTIAL_WRAPPER_SYMBOL_${i}`);
 
     try {
       // Get the proxy address from deployments
-      const proxyAddress = await get(getConfidentialWrapperProxyName(name));
+      const proxyAddress = await get(getConfidentialWrapperProxyName(symbol));
 
       // Verify the confidential wrapper contract
       await run('task:verifyConfidentialWrapper', { proxyAddress: proxyAddress.address });

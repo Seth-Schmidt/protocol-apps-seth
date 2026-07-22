@@ -1,48 +1,49 @@
-import { isDfnsConfigured, loadDfnsDeployerSigner, resolveDfnsDeployerAddress } from './dfns';
+import { isDfnsConfigured, loadDfnsDeployerSigner, resolveDfnsDeployerAddress } from './utils/dfns';
 import { getRequiredEnvVar } from './utils/loadVariables';
-import { Signer, Wallet } from 'ethers';
+import { Signer } from 'ethers';
 import { task, types } from 'hardhat/config';
 import { HardhatRuntimeEnvironment } from 'hardhat/types';
 
 export const CONTRACT_NAME = 'ConfidentialWrapper';
 
-// Select the deploy signer: DFNS custody when configured (auth secrets + a committed
-// dfnsDeployerWalletId for the network), else the local PRIVATE_KEY/MNEMONIC signer
-// from the Hardhat network `accounts`.
+// Select the deploy signer: DFNS custody when configured (auth secrets + DFNS_DEPLOYER_WALLET_ID),
+// else the local PRIVATE_KEY/MNEMONIC signer from the Hardhat network `accounts`.
 export async function getDeployerSigner(hre: HardhatRuntimeEnvironment): Promise<Signer> {
-  if (isDfnsConfigured(hre)) {
+  if (isDfnsConfigured()) {
     return loadDfnsDeployerSigner(hre);
   }
   const { deployer } = await hre.getNamedAccounts();
   return hre.ethers.getSigner(deployer);
 }
 
-// Resolve the deployer address without an RPC round-trip. DFNS uses a read-only API
-// call; the local path derives the address from the signing key directly.
+// Resolve the deployer address without an RPC round-trip (DFNS uses a read-only API call).
 export async function resolveDeployerAddress(hre: HardhatRuntimeEnvironment): Promise<string> {
-  if (isDfnsConfigured(hre)) {
+  if (isDfnsConfigured()) {
     return resolveDfnsDeployerAddress(hre);
   }
-  const privateKey = process.env.PRIVATE_KEY;
-  if (privateKey) return new Wallet(privateKey).address;
-  const mnemonic = process.env.MNEMONIC;
-  if (mnemonic) return Wallet.fromPhrase(mnemonic).address;
-  throw new Error('No signer configured: set the DFNS auth secrets + dfnsDeployerWalletId, or PRIVATE_KEY/MNEMONIC');
+  // The exact account getDeployerSigner signs with (named `deployer` = accounts[0]), so preflight
+  // checks the address that actually deploys regardless of MNEMONIC/PRIVATE_KEY config ordering.
+  const { deployer } = await hre.getNamedAccounts();
+  if (!deployer) {
+    throw new Error(
+      'No signer configured: set the DFNS auth secrets + DFNS_DEPLOYER_WALLET_ID, or PRIVATE_KEY/MNEMONIC',
+    );
+  }
+  return deployer;
 }
 
-// Get the deployment name for a confidential wrapper
-export function getConfidentialWrapperName(tokenName: string): string {
-  return `ConfidentialWrapper_${tokenName}`;
+// Artifact names are keyed by token symbol (e.g. `cUSDT`), not the human name, which can contain
+// spaces/parens that make bad filenames (`ConfidentialWrapper_Confidential Token Test_Proxy.json`).
+export function getConfidentialWrapperName(tokenSymbol: string): string {
+  return `ConfidentialWrapper_${tokenSymbol}`;
 }
 
-// Get the implementation deployment name for a confidential wrapper
-export function getConfidentialWrapperImplName(tokenName: string): string {
-  return `ConfidentialWrapper_${tokenName}_Impl`;
+export function getConfidentialWrapperImplName(tokenSymbol: string): string {
+  return `ConfidentialWrapper_${tokenSymbol}_Impl`;
 }
 
-// Get the proxy deployment name for a confidential wrapper
-export function getConfidentialWrapperProxyName(tokenName: string): string {
-  return `ConfidentialWrapper_${tokenName}_Proxy`;
+export function getConfidentialWrapperProxyName(tokenSymbol: string): string {
+  return `ConfidentialWrapper_${tokenSymbol}_Proxy`;
 }
 
 type ConfidentialWrapperInitConfig = {
@@ -67,7 +68,6 @@ function getRequiredBooleanEnvVar(name: string): boolean {
   throw new Error(`${name} must be either "true" or "false"`);
 }
 
-// Deploy a confidential wrapper contract as a function
 async function deployConfidentialWrapper(initConfig: ConfidentialWrapperInitConfig, hre: HardhatRuntimeEnvironment) {
   const { ethers, upgrades, deployments } = hre;
   const { save, getArtifact } = deployments;
@@ -84,8 +84,7 @@ async function deployConfidentialWrapper(initConfig: ConfidentialWrapperInitConf
     hasUnderlyingDenyListSelector,
   } = initConfig;
 
-  // Deploy the proxy contract. Connecting the factory to `signer` makes OZ
-  // deployProxy route both the implementation and proxy deploy through it.
+  // Connecting the factory to `signer` routes both the impl and proxy deploy through it.
   const confidentialWrapperFactory = await ethers.getContractFactory(CONTRACT_NAME, signer);
   const proxy = await upgrades.deployProxy(
     confidentialWrapperFactory,
@@ -120,11 +119,12 @@ async function deployConfidentialWrapper(initConfig: ConfidentialWrapperInitConf
     ].join('\n'),
   );
 
-  // Save the deployment artifacts
   const implementationAddress = await upgrades.erc1967.getImplementationAddress(proxyAddress);
   const artifact = await getArtifact(CONTRACT_NAME);
-  await save(getConfidentialWrapperProxyName(name), { address: proxyAddress, abi: artifact.abi });
-  await save(getConfidentialWrapperImplName(name), { address: implementationAddress, abi: artifact.abi });
+  await save(getConfidentialWrapperProxyName(symbol), { address: proxyAddress, abi: artifact.abi });
+  await save(getConfidentialWrapperImplName(symbol), { address: implementationAddress, abi: artifact.abi });
+
+  return proxyAddress;
 }
 
 // Deploy a confidential wrapper contract
@@ -138,7 +138,7 @@ async function deployConfidentialWrapper(initConfig: ConfidentialWrapperInitConf
 // --blocked-users '["0x1111111111111111111111111111111111111111"]' \
 // --underlying-deny-list-selector "0xfe575a87" \
 // --has-underlying-deny-list-selector true \
-// --network testnet
+// --network sepolia
 task('task:deployConfidentialWrapper')
   .addParam('name', 'The name of the confidential wrapper contract to deploy', undefined, types.string)
   .addParam('symbol', 'The symbol of the confidential wrapper contract to deploy', undefined, types.string)
@@ -181,7 +181,8 @@ task('task:deployConfidentialWrapper')
     },
     hre,
   ) {
-    await deployConfidentialWrapper(
+    // Return the proxy address so callers can surface it without reconstructing the artifact name.
+    return deployConfidentialWrapper(
       {
         name,
         symbol,
@@ -198,15 +199,13 @@ task('task:deployConfidentialWrapper')
 
 // Deploy all confidential wrapper contracts
 // Example usage:
-// npx hardhat task:deployAllConfidentialWrappers --network testnet
+// npx hardhat task:deployAllConfidentialWrappers --network sepolia
 task('task:deployAllConfidentialWrappers').setAction(async function (_, hre) {
   console.log('Deploying confidential wrapper contracts...');
 
-  // Get the number of confidential wrappers from environment variable
   const numWrappers = parseInt(getRequiredEnvVar('NUM_CONFIDENTIAL_WRAPPERS'));
 
   for (let i = 0; i < numWrappers; i++) {
-    // Get the name from environment variable
     const name = getRequiredEnvVar(`CONFIDENTIAL_WRAPPER_NAME_${i}`);
     const symbol = getRequiredEnvVar(`CONFIDENTIAL_WRAPPER_SYMBOL_${i}`);
     const contractUri = getRequiredEnvVar(`CONFIDENTIAL_WRAPPER_CONTRACT_URI_${i}`);
@@ -233,11 +232,8 @@ task('task:deployAllConfidentialWrappers').setAction(async function (_, hre) {
   console.log('✅ All confidential wrapper contracts deployed\n');
 });
 
-// Deploy a bare ConfidentialWrapper implementation (no proxy).
-// Used when preparing an upgrade proposal: deploy the new implementation, then call
-// `upgradeToAndCall(implAddress, reinitializeVX_calldata)` on the existing proxy.
-// Example usage:
-// npx hardhat task:deployConfidentialWrapperImpl --network testnet
+// Deploy a bare ConfidentialWrapper implementation (no proxy), for an upgrade proposal: deploy it,
+// then call `upgradeToAndCall(implAddress, reinitializeVX_calldata)` on the existing proxy.
 async function deployConfidentialWrapperImpl(hre: HardhatRuntimeEnvironment) {
   const { ethers, deployments, network } = hre;
   const { save, getArtifact } = deployments;

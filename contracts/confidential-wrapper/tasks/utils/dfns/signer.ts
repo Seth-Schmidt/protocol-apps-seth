@@ -1,9 +1,7 @@
 /**
- * An ethers v6 signer whose blockchain key lives in DFNS custody. Writes are handed
- * to DFNS `Wallets:BroadcastTransaction` (DFNS parses the transaction, can enforce
- * recipient policies, then signs and broadcasts); reads and gas estimation go through
- * the ethers `Provider`. There is no local signing, so `signTransaction`,
- * `signMessage`, and `signTypedData` throw.
+ * An ethers v6 signer whose key lives in DFNS custody. Writes go to DFNS
+ * `Wallets:BroadcastTransaction` (DFNS signs and broadcasts); reads and gas estimation use the
+ * ethers `Provider`. No local signing, so `signTransaction`/`signMessage`/`signTypedData` throw.
  */
 import { awaitBroadcastTxHash, eip1559BodyFromTx } from './broadcast';
 import type { DfnsApiClient } from '@dfns/sdk';
@@ -57,10 +55,9 @@ export class DfnsSigner extends AbstractSigner {
   }
 
   /**
-   * Route a write through DFNS: resolve to/data/value, estimate gas on the RPC when
-   * the caller did not pin it (DFNS fills nonce + fees), broadcast, poll the DFNS
-   * transaction id to its chain hash, then return the RPC's `TransactionResponse` so
-   * callers' `.wait()` confirms inclusion exactly as with a local signer.
+   * Route a write through DFNS: resolve to/data/value, estimate gas when unpinned (DFNS fills
+   * nonce + fees), broadcast, poll the DFNS id to its chain hash, then return the RPC's
+   * `TransactionResponse` so callers' `.wait()` confirms inclusion as with a local signer.
    */
   async sendTransaction(tx: TransactionRequest): Promise<TransactionResponse> {
     const provider = this.provider;

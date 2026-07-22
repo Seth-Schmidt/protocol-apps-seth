@@ -1,10 +1,7 @@
 /**
- * DFNS deployer entry points for the Hardhat deploy tasks.
- *
- * The signing path activates only when BOTH the DFNS auth secrets are present in the
- * environment AND the active network has a committed `dfnsDeployerWalletId`; deploy
- * tasks fall back to the local `PRIVATE_KEY`/`MNEMONIC` signer otherwise (see
- * `getDeployerSigner` in ../deploy.ts).
+ * DFNS deployer entry points for the Hardhat deploy tasks. The signing path activates only when
+ * the DFNS auth secrets AND `DFNS_DEPLOYER_WALLET_ID` are set; otherwise deploy tasks fall back to
+ * the local `PRIVATE_KEY`/`MNEMONIC` signer (see `getDeployerSigner` in ../deploy.ts).
  */
 import { hasDfnsAuthEnv, loadDfnsAuth, dfnsApiClient } from './auth';
 import { DfnsSigner } from './signer';
@@ -15,25 +12,22 @@ export { hasDfnsAuthEnv, loadDfnsAuth, normalizePem, dfnsApiClient, DFNS_AUTH_EN
 export { DfnsSigner } from './signer';
 export { hasDeployerWalletId, loadDeployerWalletId, resolveDfnsWalletAddress } from './wallets';
 
-/** True when DFNS should be used to sign: auth secrets set AND a wallet id committed. */
-export function isDfnsConfigured(hre: HardhatRuntimeEnvironment): boolean {
-  return hasDfnsAuthEnv() && hasDeployerWalletId(hre);
+/** True when DFNS should be used to sign: auth secrets set AND DFNS_DEPLOYER_WALLET_ID set. */
+export function isDfnsConfigured(): boolean {
+  return hasDfnsAuthEnv() && hasDeployerWalletId();
 }
 
-/**
- * Resolve the DFNS deployer address for the active network via the read-only
- * `Wallets:GetWallet`. Makes no RPC request.
- */
-export async function resolveDfnsDeployerAddress(hre: HardhatRuntimeEnvironment): Promise<string> {
+/** Resolve the DFNS deployer address via the read-only `Wallets:GetWallet`. No RPC request. */
+export async function resolveDfnsDeployerAddress(_hre: HardhatRuntimeEnvironment): Promise<string> {
   const auth = loadDfnsAuth();
-  const walletId = loadDeployerWalletId(hre);
+  const walletId = loadDeployerWalletId();
   return resolveDfnsWalletAddress(auth, walletId);
 }
 
 /** A `DfnsSigner` for the active network, connected to the Hardhat RPC provider. */
 export async function loadDfnsDeployerSigner(hre: HardhatRuntimeEnvironment): Promise<DfnsSigner> {
   const auth = loadDfnsAuth();
-  const walletId = loadDeployerWalletId(hre);
+  const walletId = loadDeployerWalletId();
   const address = await resolveDfnsWalletAddress(auth, walletId);
   const dfns = dfnsApiClient(auth);
   return new DfnsSigner(dfns, walletId, address, hre.ethers.provider);
