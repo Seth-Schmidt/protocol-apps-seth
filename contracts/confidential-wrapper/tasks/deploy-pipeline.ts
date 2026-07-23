@@ -146,9 +146,14 @@ async function readUnderlyingMetadata(
   }
 }
 
-// Build the default contractUri metadata blob from the resolved name/symbol.
+// Build the default contractUri metadata blob from the resolved name/symbol. Wording matches the
+// live deployments so committed entries can omit contractUri.
 function defaultContractUri(name: string, symbol: string, underlyingSymbol: string): string {
-  const metadata = JSON.stringify({ name, symbol, description: `Confidential wrapper of ${underlyingSymbol}` });
+  const metadata = JSON.stringify({
+    name,
+    symbol,
+    description: `Confidential wrapper of ${underlyingSymbol} shielding it into a confidential token`,
+  });
   return `data:application/json;utf8,${metadata}`;
 }
 
@@ -162,7 +167,9 @@ async function resolveWrapperParams(hre: HardhatRuntimeEnvironment, underlying: 
   let { name, contractUri } = entry;
   if (name === undefined || contractUri === undefined) {
     const meta = await readUnderlyingMetadata(hre, entry.underlying);
-    if (name === undefined) name = `Confidential ${meta.name}`;
+    // Wrappers are named `Confidential <underlying symbol>` (e.g. USDC → "Confidential USDC"),
+    // matching the live deployments — not the underlying's longer name() ("USD Coin").
+    if (name === undefined) name = `Confidential ${meta.symbol}`;
     if (contractUri === undefined) contractUri = defaultContractUri(name, symbol, meta.symbol);
   }
   return {
@@ -217,13 +224,11 @@ task('task:printDeployerAddress').setAction(async function (_, hre) {
 });
 
 // task:preflightConfidentialWrapper — read-only validation gate run before broadcasting.
-// FORCE_REDEPLOY=true bypasses only the existing-proxy guard.
 task('task:preflightConfidentialWrapper')
   .addParam('underlying', 'Underlying ERC-20 address; selects the entry in deploy-params/<tier>/<network>/wrappers.json', undefined, types.string)
   .addParam('deployerAddress', 'The resolved deployer address (public info)', undefined, types.string)
   .setAction(async function ({ underlying, deployerAddress }, hre) {
     const { ethers, deployments } = hre;
-    const forceRedeploy = process.env.FORCE_REDEPLOY === 'true';
 
     // Fatal: nothing else can run against bad params.
     const params = await resolveWrapperParams(hre, underlying);
@@ -268,22 +273,21 @@ task('task:preflightConfidentialWrapper')
       lines.push(`  ✓ deployer balance ${ethers.formatEther(balance)} ETH ≥ ${ethers.formatEther(threshold)} ETH`);
     }
 
-    // Proxy-redeploy guard: refuse to re-deploy an existing proxy name unless forced.
+    // Proxy-redeploy guard: refuse to re-deploy an existing proxy name. A genuine redeploy is
+    // exceptional and must use the manual runbook, not CI.
     const proxyName = getConfidentialWrapperProxyName(params.symbol);
     const existingProxy = await deployments.getOrNull(proxyName);
-    if (existingProxy && !forceRedeploy) {
+    if (existingProxy) {
       failures.push(
-        `proxy "${proxyName}" already deployed at ${existingProxy.address}; set force_redeploy=true to deploy a new proxy`,
+        `proxy "${proxyName}" already deployed at ${existingProxy.address}; a genuine redeploy must use the manual runbook`,
       );
-    } else if (existingProxy && forceRedeploy) {
-      lines.push(`  ! proxy "${proxyName}" exists at ${existingProxy.address} — FORCE_REDEPLOY set, will deploy anew`);
     } else {
       lines.push(`  ✓ no existing proxy named "${proxyName}"`);
     }
 
     // Registry dedup (authoritative, keyed by underlying): one wrapper per token, revocation is
-    // permanent. Hard fail — force_redeploy does NOT bypass it (a second proxy could never be
-    // registered). Exceptional cases use the manual runbook.
+    // permanent. Hard fail — a second proxy could never be registered. Exceptional cases use the
+    // manual runbook.
     try {
       const registry = new ethers.Contract(networkConfig.registry, REGISTRY_ABI, ethers.provider);
       const [isValid, registered] = await registry.getConfidentialTokenAddress(params.underlying);
