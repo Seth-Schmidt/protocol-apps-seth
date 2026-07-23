@@ -196,6 +196,9 @@ jobs:
           if [ -z "${ETHERSCAN_API_KEY:-}" ]; then
             echo "::warning::ETHERSCAN_API_KEY is empty in the ${TIER}-${NETWORK}-deploy environment; verification will likely be rate-limited. Deploy is unaffected."
           fi
+          # Brief wait so Etherscan can index the deploy tx / Upgraded logs before OZ's verify interceptor queries them.
+          echo "Waiting 10s for Etherscan indexing…"
+          sleep 10
           npx hardhat task:verifyConfidentialWrapper --proxy-address "$PROXY" --network "$NETWORK"
 
       - name: Post-deploy checks
