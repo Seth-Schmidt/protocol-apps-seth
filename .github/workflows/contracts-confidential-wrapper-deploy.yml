@@ -179,7 +179,7 @@ jobs:
             --network "$NETWORK"
           echo "deployed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Verify on Etherscan
+      - name: Verify on explorers
         id: verify
         continue-on-error: true
         env:
@@ -194,10 +194,10 @@ jobs:
           fi
           echo "Proxy address: $PROXY"
           if [ -z "${ETHERSCAN_API_KEY:-}" ]; then
-            echo "::warning::ETHERSCAN_API_KEY is empty in the ${TIER}-${NETWORK}-deploy environment; verification will likely be rate-limited. Deploy is unaffected."
+            echo "::warning::ETHERSCAN_API_KEY is empty in the ${TIER}-${NETWORK}-deploy environment."
           fi
-          # Brief wait so Etherscan can index the deploy tx / Upgraded logs before OZ's verify interceptor queries them.
-          echo "Waiting 10s for Etherscan indexing…"
+          # Brief wait so explorers can index the deploy tx / Upgraded logs.
+          echo "Waiting 10s for explorer indexing…"
           sleep 10
           npx hardhat task:verifyConfidentialWrapper --proxy-address "$PROXY" --network "$NETWORK"
 
@@ -237,6 +237,15 @@ jobs:
             echo "1. Review the DAO registration calldata above and submit the governance proposal to register the wrapper."
             echo "2. Merge the auto-opened state PR so committed deployment state stays current (the next run reads committed state)."
             echo "3. Update docs/addresses/ with the new wrapper entry."
+            if [ "${{ steps.verify.outcome }}" = "failure" ] && [ -n "${{ steps.deploy.outputs.proxy }}" ]; then
+              echo ""
+              echo "### Re-run verification"
+              echo "Etherscan verification did not complete — deploy is fine. From \`contracts/confidential-wrapper\`:"
+              echo ""
+              echo '```bash'
+              echo "npx hardhat task:verifyConfidentialWrapper --proxy-address ${{ steps.deploy.outputs.proxy }} --network ${NETWORK}"
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload deploy artifacts
