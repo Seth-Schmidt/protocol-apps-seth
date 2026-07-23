@@ -18,6 +18,17 @@ export type NetworkConfig = {
   minDeployerBalanceWei: string;
 };
 
+/** Minimal shape needed to look up a wrappers.json entry by underlying address. */
+export type WrapperParamsEntry = {
+  underlying: string;
+  name?: string;
+  contractUri?: string;
+  owner?: string;
+  blockedUsers?: unknown;
+  underlyingDenyListSelector?: string;
+  hasUnderlyingDenyListSelector?: unknown;
+};
+
 export function readJsonFile<T>(path: string): T {
   if (!existsSync(path)) {
     throw new Error(`File not found: ${path}`);
@@ -73,4 +84,52 @@ export function networkParamsPaths(networkName: string): {
 
 export function loadNetworkConfig(networkName: string): NetworkConfig {
   return readJsonFile<NetworkConfig>(networkParamsPaths(networkName).networkJson);
+}
+
+/**
+ * Find the wrappers.json entry whose `underlying` matches (checksum-insensitive).
+ * Entries are keyed by wrapper symbol; each underlying may appear once.
+ */
+export function findWrapperByUnderlying(
+  networkName: string,
+  underlying: string,
+): { symbol: string; entry: WrapperParamsEntry; paramsFile: string } {
+  const { tier, wrappersJson } = networkParamsPaths(networkName);
+  const paramsFile = `deploy-params/${tier}/${networkName}/wrappers.json`;
+
+  if (!existsSync(wrappersJson)) {
+    throw new Error(`${paramsFile} not found — add it and merge before deploying`);
+  }
+
+  const entries = readJsonFile<Record<string, WrapperParamsEntry>>(wrappersJson);
+  const target = underlying.toLowerCase();
+  const matches: { symbol: string; entry: WrapperParamsEntry }[] = [];
+
+  for (const [symbol, entry] of Object.entries(entries)) {
+    if (!entry || typeof entry.underlying !== 'string') {
+      throw new Error(`Entry "${symbol}" in ${paramsFile} is missing an "underlying" address`);
+    }
+    if (entry.underlying.toLowerCase() === target) {
+      matches.push({ symbol, entry });
+    }
+  }
+
+  if (matches.length === 0) {
+    throw new Error(
+      `${paramsFile} has no entry with underlying ${underlying} — add it and merge before deploying ` +
+        `(have: ${Object.keys(entries).join(', ') || '<none>'})`,
+    );
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `Multiple entries in ${paramsFile} share underlying ${underlying} (${matches.map(m => m.symbol).join(', ')}); ` +
+        `each underlying may appear once`,
+    );
+  }
+
+  const { symbol, entry } = matches[0];
+  if (symbol.length === 0) {
+    throw new Error(`Empty wrapper symbol key in ${paramsFile}`);
+  }
+  return { symbol, entry, paramsFile };
 }

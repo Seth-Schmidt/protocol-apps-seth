@@ -134,21 +134,9 @@ jobs:
       # --- Deploy pipeline -------------------------------------------------
       - name: Check params entry exists
         id: params
-        # Fail fast (before the expensive compile) if wrappers.json has no entry whose `underlying`
-        # matches (checksum-insensitive). Entries are keyed by wrapper symbol. Args passed as argv,
-        # never interpolated. Deploy re-validates. Emits `symbol` (the wrapper key) for the state PR.
-        run: |
-          node -e '
-            const fs = require("fs");
-            const [tier, network, underlying] = [process.argv[1], process.argv[2], process.argv[3].toLowerCase()];
-            const file = `deploy-params/${tier}/${network}/wrappers.json`;
-            if (!fs.existsSync(file)) { console.error(`::error::${file} not found — add it and merge before deploying`); process.exit(1); }
-            const entries = JSON.parse(fs.readFileSync(file, "utf8"));
-            const match = Object.entries(entries).find(([, e]) => e && typeof e.underlying === "string" && e.underlying.toLowerCase() === underlying);
-            if (!match) { console.error(`::error::${file} has no entry with underlying ${underlying} — add it and merge before deploying`); process.exit(1); }
-            console.log(`Using ${file} → ${match[0]} (${match[1].underlying})`);
-            fs.appendFileSync(process.env.GITHUB_OUTPUT, `symbol=${match[0]}\n`);
-          ' "$TIER" "$NETWORK" "$UNDERLYING"
+        # Fail fast (before the expensive compile) if wrappers.json has no matching underlying.
+        # Emits `symbol` for the state PR. Deploy re-validates.
+        run: npx hardhat task:checkParamsEntry --underlying "$UNDERLYING" --network "$NETWORK"
 
       - name: Compile
         run: npx hardhat compile
