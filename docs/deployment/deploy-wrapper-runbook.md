@@ -16,8 +16,8 @@ Before starting, collect the following for each wrapper being deployed:
 | Owner address for target chain (Protocol DAO) | [Addresses directory](https://github.com/zama-ai/protocol-apps/tree/main/docs/addresses) |
 | Denylist function selector (`bytes4`) | Underlying token contract ABI. Use `0x00000000` and `false` if the underlying has no denylist |
 | Initial blocked-users list (JSON array) | Compliance / legal. Use `'[]'` if none |
-| Contract URI JSON metadata | Follow the pattern `data:application/json;utf8,{"name":"...","symbol":"...","description":"..."}` |
-| `MNEMONIC` or `PRIVATE_KEY` for the deployer | DFNS / internal secrets |
+| Contract URI JSON metadata (optional) | Follow the pattern `data:application/json;utf8,{"name":"...","symbol":"...","description":"..."}`. Optional for CI deploys — omit to derive it from the (defaulted) name/symbol |
+| Deployer signer — DFNS custody (`DFNS_AUTH_TOKEN` / `DFNS_CRED_ID` / `DFNS_PRIVATE_KEY` / `DFNS_DEPLOYER_WALLET_ID`), or a local `MNEMONIC` / `PRIVATE_KEY` fallback | DFNS console / internal secrets. See [DFNS custody signing](#dfns-custody-signing) |
 | `ETHERSCAN_API_KEY` | Etherscan dashboard |
 | RPC URL for the target network | Infura / Alchemy / internal node / public endpoint |
 
@@ -60,6 +60,42 @@ Within a batch run, all proxies share the same implementation. The deploy task r
 
 ---
 
+## DFNS custody signing
+
+Deploys can sign through **DFNS MPC custody** so the deployer key never leaves DFNS. The
+signing path activates when the full DFNS set is present — the three auth secrets **and**
+`DFNS_DEPLOYER_WALLET_ID`; otherwise the pipeline falls back to the local `MNEMONIC` /
+`PRIVATE_KEY` signer, so DFNS is not required to deploy with a raw key.
+
+**What is / isn't a secret**
+
+| Value | Kind | Where it lives |
+| --- | --- | --- |
+| `DFNS_AUTH_TOKEN`, `DFNS_CRED_ID`, `DFNS_PRIVATE_KEY` | Secret | `<tier>-<network>-deploy` GitHub Environment (admin sets once) |
+| `DFNS_DEPLOYER_WALLET_ID` | Non-sensitive (maps to a public address) | Set in the same `<tier>-<network>-deploy` Environment so all DFNS config lives together |
+
+The DFNS service account needs `Wallets:GetWallet` + `Wallets:BroadcastTransaction` (and
+`Wallets:CreateWallet` / `Wallets:ListWallets` for provisioning) — **not** the raw
+`generateSignature` permission.
+
+**One-time setup**
+
+1. Provision the deployer wallet (needs only the DFNS auth secrets in your env):
+   ```bash
+   npm run dfns:provision -- --network sepolia   # or ethereum; omit --network for both
+   ```
+2. Fund the printed address above `minDeployerBalanceWei`.
+3. Set `DFNS_AUTH_TOKEN` / `DFNS_CRED_ID` / `DFNS_PRIVATE_KEY` / `DFNS_DEPLOYER_WALLET_ID` (the
+   printed wallet id) in the `<tier>-<network>-deploy` GitHub Environment.
+
+The workflow uses DFNS at two points: **resolve deployer address**
+(`task:printDeployerAddress` — a read-only DFNS call, no RPC) and **deploy**
+(`upgrades.deployProxy` routed through the `DfnsSigner`, which broadcasts via DFNS
+`BroadcastTransaction`). Both fall back to the `PRIVATE_KEY` signer when DFNS is not
+configured.
+
+---
+
 Pick the option that matches your task:
 
 - **Option 1 — Fresh wrapper contract deployment**: a new token is being wrapped for the first time. Deploys a proxy (and implementation, if none exists), verifies, then registers the wrapper.
@@ -79,18 +115,19 @@ Pick one path below. Both leave you with a deployed, Etherscan-verified proxy; t
 
 The standard fresh deploy (proxy + implementation at repo `HEAD`, verify, emit DAO-registration info) can be run from CI instead of a laptop, via the **contracts-confidential-wrapper-deploy** workflow. This keeps the deployer key in a reviewed GitHub Environment and commits deployment state back to the repo.
 
-1. **Add the params file.** Open a PR adding `contracts/confidential-wrapper/deploy-params/<network>/<wrapper>.json` (fields documented in [`deploy-params/README.md`](../../contracts/confidential-wrapper/deploy-params/README.md)). The `owner` **must** be the network DAO — the workflow's preflight hard-fails otherwise. Merge the PR before deploying (the workflow only runs reviewed code on `main`).
+1. **Add the params entry.** Open a PR adding an entry to `contracts/confidential-wrapper/deploy-params/<tier>/<network>/wrappers.json`, keyed by the wrapper symbol (e.g. `cUSDC`), with the wrapped token in the `underlying` field (fields documented in [`deploy-params/SCHEMA.md`](../../contracts/confidential-wrapper/deploy-params/SCHEMA.md)). `name` and `contractUri` are optional — omit them to default to `Confidential <underlying symbol>` and a derived metadata blob. `owner` is optional and defaults to the network DAO; set it only to intentionally use a non-DAO owner (preflight flags overrides). Merge the PR before deploying (the workflow only runs reviewed code on `main`).
 2. **Dispatch the workflow.** From the Actions tab, run **contracts-confidential-wrapper-deploy** with:
-   - `network` — `testnet` or `mainnet`
-   - `wrapper` — the token symbol, which must match a params file under `deploy-params/<network>/`, e.g. `cUSDT` for `deploy-params/<network>/cUSDT.json`
-   - `force_redeploy` — leave `false` unless you intend to deploy a second proxy for a name that already exists
-3. **Approve the environment gate.** The run pauses until a required reviewer for the `<network>-deploy` environment approves. Anyone may dispatch, but nothing runs or spends deployer funds without approval.
+   - `target` — the tier-network to deploy to, picked from the dropdown (e.g. `testnet-sepolia`, `mainnet-ethereum`); each option maps to a `deploy-params/<tier>/<network>/` dir and the `<target>-deploy` GitHub environment
+   - `underlying` — the underlying ERC-20 address, which must have an entry in `deploy-params/<tier>/<network>/wrappers.json`, e.g. `0xdAC17F958D2ee523a2206206994597C13D831ec7`
+3. **Approve the environment gate.** The run pauses until a required reviewer for the `<tier>-<network>-deploy` environment approves. Anyone may dispatch, but nothing runs or spends deployer funds without approval.
+
+> Preflight hard-fails if a proxy for the wrapper symbol already exists in committed state, or if the registry already has a confidential wrapper for the underlying — the registry allows only one wrapper per token and revocation is permanent, so a second deploy could never be registered. CI never redeploys; a genuine redeploy is exceptional and uses the manual steps below.
 4. **Read the results.** The run summary lists the proxy + implementation addresses, verified Etherscan status, `isConfidentialTokenValid` (expected `false` pre-registration), and the ready-made `registerConfidentialToken(address,address)` calldata for the DAO proposal. Full details are also in the uploaded `deploy-log.json` artifact.
-5. **Merge the state PR.** On a successful deploy the workflow opens a `deploy/wrapper-<network>-<wrapper>-<run_id>` PR committing the `deployments/` artifacts and `.openzeppelin/` manifest. Merge it promptly so the next run starts from committed state (it reuses the implementation from the manifest).
+5. **Merge the state PR.** On a successful deploy the workflow opens a `deploy/wrapper-<tier>-<network>-<underlying>-<run_id>` PR committing the `deployments/` artifacts and `.openzeppelin/` manifest. Merge it promptly so the next run starts from committed state (it reuses the implementation from the manifest).
 
 The workflow already verifies the wrapper on Etherscan, so skip Path B and continue to **Step 2** below.
 
-> **Operator setup (one-time, GitHub admin):** create the `testnet-deploy` / `mainnet-deploy` environments with required reviewers (enable "prevent self-review") and a deployment-branch policy of `main` only; add environment secrets `PRIVATE_KEY` (a dedicated per-network deployer), `SEPOLIA_DEPLOYMENT_RPC_URL` for `testnet-deploy` or `MAINNET_DEPLOYMENT_RPC_URL` for `mainnet-deploy`, and `ETHERSCAN_API_KEY`; fund the deployer wallets above `minDeployerBalanceWei`; and enable repo Actions setting "Allow GitHub Actions to create and approve pull requests" (the state-PR job needs it).
+> **Operator setup (one-time, GitHub admin):** create one `<tier>-<network>-deploy` environment per chain (e.g. `testnet-sepolia-deploy`, `mainnet-ethereum-deploy`) with required reviewers (enable "prevent self-review") and a deployment-branch policy of `main` only; in each, add the **signer** values — either the full DFNS set `DFNS_AUTH_TOKEN` / `DFNS_CRED_ID` / `DFNS_PRIVATE_KEY` / `DFNS_DEPLOYER_WALLET_ID` (see [DFNS custody signing](#dfns-custody-signing)) **or** a dedicated per-network `PRIVATE_KEY` — plus a single `DEPLOYMENT_RPC_URL` (the RPC for that chain) and `ETHERSCAN_API_KEY`; fund the deployer wallets above `minDeployerBalanceWei`; and enable repo Actions setting "Allow GitHub Actions to create and approve pull requests" (the state-PR job needs it). Adding a chain later needs a new `<tier>-<network>-deploy` environment + a `deploy-params/<tier>/<network>/` dir + a Hardhat network, plus a one-line addition of the `<tier>-<network>` value to the workflow's `target` dropdown options.
 
 #### Path B — Manual deployment
 
@@ -109,7 +146,7 @@ Populate `.env` with all required values. For a batch of `N` wrappers (replace `
 ```dotenv
 # Auth
 MNEMONIC=                          # or PRIVATE_KEY=
-MAINNET_RPC_URL=
+ETHEREUM_RPC_URL=
 ETHERSCAN_API_KEY=
 
 NUM_CONFIDENTIAL_WRAPPERS=N
@@ -131,7 +168,7 @@ CONFIDENTIAL_WRAPPER_HAS_UNDERLYING_DENY_LIST_SELECTOR_{i}=  # true | false
 **Batch (recommended when deploying multiple wrappers):**
 
 ```bash
-npx hardhat task:deployAllConfidentialWrappers --network mainnet
+npx hardhat task:deployAllConfidentialWrappers --network ethereum
 ```
 
 **Single wrapper:**
@@ -148,7 +185,7 @@ npx hardhat task:deployConfidentialWrapper \
   --blocked-users '[]' \
   --underlying-deny-list-selector 0xfe575a87 \
   --has-underlying-deny-list-selector true \
-  --network mainnet
+  --network ethereum
 ```
 
 On success, each wrapper prints:
@@ -168,7 +205,7 @@ Record the proxy address for every wrapper.
 **Batch:**
 
 ```bash
-npx hardhat task:verifyAllConfidentialWrappers --network mainnet
+npx hardhat task:verifyAllConfidentialWrappers --network ethereum
 ```
 
 **Single:**
@@ -176,7 +213,7 @@ npx hardhat task:verifyAllConfidentialWrappers --network mainnet
 ```bash
 npx hardhat task:verifyConfidentialWrapper \
   --proxy-address <PROXY_ADDRESS> \
-  --network mainnet
+  --network ethereum
 ```
 
 This verifies both the proxy contract and the implementation contract. Since all wrappers share the same implementation bytecode, the implementation source will already be verified from the second wrapper onward. Etherscan will report a duplicate-verification notice, which is expected.
@@ -228,14 +265,14 @@ Minimal `.env` required for this step:
 
 ```dotenv
 MNEMONIC=                          # or PRIVATE_KEY=
-MAINNET_RPC_URL=
+ETHEREUM_RPC_URL=
 ETHERSCAN_API_KEY=
 ```
 
 Deploy the implementation contract:
 
 ```bash
-npx hardhat task:deployConfidentialWrapperImpl --network mainnet
+npx hardhat task:deployConfidentialWrapperImpl --network ethereum
 ```
 
 The implementation is saved as `ConfidentialWrapper_Impl` in the deployments artifacts. Record the implementation address printed on success.
@@ -245,7 +282,7 @@ The implementation is saved as `ConfidentialWrapper_Impl` in the deployments art
 ```bash
 npx hardhat task:verifyConfidentialWrapperImpl \
   --impl-address <IMPL_ADDRESS> \
-  --network mainnet
+  --network ethereum
 ```
 
 ### Step 5 — Submit the DAO upgrade proposal

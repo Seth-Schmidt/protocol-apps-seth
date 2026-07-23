@@ -14,6 +14,7 @@ import { HardhatUserConfig, HttpNetworkAccountsUserConfig } from 'hardhat/types'
 import { resolve } from 'path';
 import 'solidity-coverage';
 import 'hardhat-exposed';
+import { isDfnsConfigured } from './tasks/utils/dfns';
 
 import './tasks/accounts';
 import './tasks/deploy';
@@ -42,9 +43,11 @@ const accounts: HttpNetworkAccountsUserConfig | undefined = MNEMONIC
     ? [PRIVATE_KEY]
     : undefined;
 
-if (accounts == null) {
+if (accounts == null && !isDfnsConfigured()) {
   console.warn(
-    'Could not find MNEMONIC or PRIVATE_KEY environment variables. It will not be possible to execute transactions in your example.',
+    'No signer configured. Read-only tasks still work; to broadcast transactions, set MNEMONIC or ' +
+      'PRIVATE_KEY, or use DFNS custody signing (DFNS_AUTH_TOKEN / DFNS_CRED_ID / DFNS_PRIVATE_KEY / ' +
+      'DFNS_DEPLOYER_WALLET_ID).',
   );
 }
 
@@ -60,25 +63,43 @@ task('test', 'Runs the test suite with environment variables from .env.example')
 
 const config: HardhatUserConfig = {
   solidity: {
-    version: '0.8.27',
-    settings: {
-      optimizer: {
-        enabled: true,
-        runs: 800,
+    // 0.8.27 first: Hardhat picks the first matching compiler for `^0.8.27` pragmas, so deploys
+    // stay on 0.8.27. 0.8.29 is also listed so hardhat-verify can match OZ upgrades-core's
+    // precompiled ERC1967Proxy (bundled at 0.8.29) without CompilerVersionsMismatchError.
+    compilers: [
+      {
+        version: '0.8.27',
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 800,
+          },
+          evmVersion: 'cancun',
+        },
       },
-      evmVersion: 'cancun',
-    },
+      {
+        version: '0.8.29',
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 800,
+          },
+          evmVersion: 'cancun',
+        },
+      },
+    ],
   },
   networks: {
-    // ChainID must be specified in order to be able to verify contracts using the fhevm hardhat plugin
-    mainnet: {
-      url: process.env.MAINNET_RPC_URL || '',
+    // Networks are named by chain (tier is a deploy-params grouping, not a Hardhat network). CI
+    // injects one DEPLOYMENT_RPC_URL per environment; local dev uses <NETWORK>_RPC_URL. chainId is
+    // required for the fhevm plugin's verification.
+    ethereum: {
+      url: process.env.DEPLOYMENT_RPC_URL || process.env.ETHEREUM_RPC_URL || '',
       accounts,
       chainId: 1,
     },
-    // ChainID must be specified in order to be able to verify contracts using the fhevm hardhat plugin
-    testnet: {
-      url: process.env.SEPOLIA_RPC_URL || '',
+    sepolia: {
+      url: process.env.DEPLOYMENT_RPC_URL || process.env.SEPOLIA_RPC_URL || '',
       accounts,
       chainId: 11155111,
     },
@@ -107,6 +128,12 @@ const config: HardhatUserConfig = {
   },
   etherscan: {
     apiKey: process.env.ETHERSCAN_API_KEY!,
+  },
+  sourcify: {
+    enabled: true,
+  },
+  blockscout: {
+    enabled: true,
   },
   exposed: {
     imports: true,
