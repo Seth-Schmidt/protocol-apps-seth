@@ -63,9 +63,7 @@ task('test', 'Runs the test suite with environment variables from .env.example')
 
 const config: HardhatUserConfig = {
   solidity: {
-    // Pinned to match the live on-chain deployments (compiled with 0.8.29); required for Etherscan
-    // verification and to keep future deploys byte-for-byte consistent with what is already deployed.
-    version: '0.8.29',
+    version: '0.8.27',
     settings: {
       optimizer: {
         enabled: true,
