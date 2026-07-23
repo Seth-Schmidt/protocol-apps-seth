@@ -18,7 +18,7 @@ Wraps standard ERC20 tokens into confidential ERC7984 tokens using FHE. Deployed
 | `ETHEREUM_RPC_URL` | RPC URL for the `ethereum` network (mainnet) |
 | `SEPOLIA_RPC_URL` | RPC URL for the `sepolia` network (Sepolia testnet) |
 | `DEPLOYMENT_RPC_URL` | Optional. If set, overrides the per-network RPC URL for the active `--network` (CI injects this per environment) |
-| `ETHERSCAN_API_KEY` | Etherscan API key (required for contract verification) |
+| `ETHERSCAN_API_KEY` | Etherscan API key (required for Etherscan verification; Blockscout/Sourcify need none) |
 
 ### DFNS custody signing (optional)
 
