@@ -15,10 +15,10 @@ deploy-params/
 └── mainnet/ethereum/{network,wrappers}.json
 ```
 
-Dispatch `tier=testnet network=sepolia underlying=0x9b5C…dFfF` deploys the
+Dispatch `target=testnet-sepolia underlying=0x9b5C…dFfF` deploys the
 `testnet/sepolia/wrappers.json` entry whose `underlying` matches that address
 (checksum-insensitive). Adding a chain = new dir + Hardhat network + `<tier>-<network>-deploy`
-environment; no workflow edits.
+environment + the `<tier>-<network>` value added to the workflow's `target` dropdown.
 
 ## `network.json`
 
