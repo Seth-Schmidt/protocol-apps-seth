@@ -14,17 +14,13 @@ name: contracts-confidential-wrapper-deploy
 on:
   workflow_dispatch:
     inputs:
-      tier:
-        description: 'Deploy tier (selects the GitHub environment + deploy-params dir)'
+      target:
+        description: 'Deploy target — tier-network (selects the GitHub environment + deploy-params/<tier>/<network>/ dir). Add a new chain here when adding its dir.'
         type: choice
         options:
-          - testnet
-          - mainnet
-        default: testnet
-        required: true
-      network:
-        description: 'Target chain / Hardhat network, e.g. sepolia or ethereum — must have a deploy-params/<tier>/<network>/ dir'
-        type: string
+          - testnet-sepolia
+          - mainnet-ethereum
+        default: testnet-sepolia
         required: true
       underlying:
         description: 'Underlying ERC-20 address (0x…), which must have an entry in deploy-params/<tier>/<network>/wrappers.json'
@@ -39,8 +35,8 @@ on:
 permissions: {}
 
 concurrency:
-  # Serialize per (tier, network); never cancel a run that may be broadcasting a deploy.
-  group: deploy-wrapper-${{ inputs.tier }}-${{ inputs.network }}
+  # Serialize per target (tier-network); never cancel a run that may be broadcasting a deploy.
+  group: deploy-wrapper-${{ inputs.target }}
   cancel-in-progress: false
 
 env:
@@ -52,7 +48,7 @@ jobs:
   deploy:
     name: deploy
     runs-on: ubuntu-latest
-    environment: ${{ inputs.tier }}-${{ inputs.network }}-deploy
+    environment: ${{ inputs.target }}-deploy
     permissions:
       contents: 'read' # Required to checkout repository code
     timeout-minutes: 30
@@ -60,8 +56,7 @@ jobs:
       run:
         working-directory: contracts/confidential-wrapper
     env:
-      TIER: ${{ inputs.tier }}
-      NETWORK: ${{ inputs.network }}
+      TARGET: ${{ inputs.target }}
       UNDERLYING: ${{ inputs.underlying }}
     outputs:
       deployed: ${{ steps.deploy.outputs.deployed }}
@@ -72,6 +67,13 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: 'false'
+
+      - name: Parse deploy target
+        # Split the tier-network choice into TIER/NETWORK for the steps below. tier is always
+        # testnet|mainnet (no dash), so split on the first dash; network keeps any remaining dashes.
+        run: |
+          echo "TIER=${TARGET%%-*}" >> "$GITHUB_ENV"
+          echo "NETWORK=${TARGET#*-}" >> "$GITHUB_ENV"
 
       # --- Guards (fail fast before the expensive setup below) ------------
       - name: Guard — validate underlying input
@@ -276,12 +278,12 @@ jobs:
         if: ${{ always() && steps.deps.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: wrapper-deploy-${{ inputs.tier }}-${{ inputs.network }}-${{ inputs.underlying }}-${{ github.run_id }}
+          name: wrapper-deploy-${{ inputs.target }}-${{ inputs.underlying }}-${{ github.run_id }}
           retention-days: 90
           include-hidden-files: true
           if-no-files-found: warn
           path: |
-            contracts/confidential-wrapper/deployments/${{ inputs.network }}/
+            contracts/confidential-wrapper/deployments/${{ env.NETWORK }}/
             contracts/confidential-wrapper/.openzeppelin/*.json
             contracts/confidential-wrapper/deploy-log.json
 
@@ -314,25 +316,25 @@ jobs:
       - name: Download deploy artifacts onto the tree
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: wrapper-deploy-${{ inputs.tier }}-${{ inputs.network }}-${{ inputs.underlying }}-${{ github.run_id }}
+          name: wrapper-deploy-${{ inputs.target }}-${{ inputs.underlying }}-${{ github.run_id }}
           path: contracts/confidential-wrapper
 
       - name: Open state PR
-        uses: peter-evans/create-pull-request@c5a7806660adbe173f04e3e038b0ccdcd758773c # v6.1.0
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           add-paths: |
             contracts/confidential-wrapper/deployments/**
             contracts/confidential-wrapper/.openzeppelin/*.json
-          branch: deploy/wrapper-${{ inputs.tier }}-${{ inputs.network }}-${{ inputs.underlying }}-${{ github.run_id }}
+          branch: deploy/wrapper-${{ inputs.target }}-${{ inputs.underlying }}-${{ github.run_id }}
           base: main
-          commit-message: 'chore: persist ${{ inputs.underlying }} deploy state (${{ inputs.tier }}/${{ inputs.network }})'
-          title: 'chore: persist ${{ inputs.underlying }} deploy state (${{ inputs.tier }}/${{ inputs.network }})'
+          commit-message: 'chore: persist ${{ inputs.underlying }} deploy state (${{ inputs.target }})'
+          title: 'chore: persist ${{ inputs.underlying }} deploy state (${{ inputs.target }})'
           body: |
             Automated deployment-state commit from run
             [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
 
             Persists the OpenZeppelin manifest and `hardhat-deploy` artifacts for the
-            `${{ inputs.underlying }}` wrapper on `${{ inputs.tier }}/${{ inputs.network }}` so the next
+            `${{ inputs.underlying }}` wrapper on `${{ inputs.target }}` so the next
             deploy run starts from committed state and can reuse the implementation.
 
             ⚠️ The wrapper is not active until the Protocol DAO registers it — see the
