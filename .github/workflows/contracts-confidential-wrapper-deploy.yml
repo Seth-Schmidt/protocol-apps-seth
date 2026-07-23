@@ -185,9 +185,10 @@ jobs:
         env:
           ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
           DEPLOYMENT_RPC_URL: ${{ secrets.DEPLOYMENT_RPC_URL }}
+          # Step outputs via env (not ${{ }} in the script) to satisfy zizmor template-expansion checks.
+          PROXY: ${{ steps.deploy.outputs.proxy }}
         run: |
           # The deploy step emits the proxy address, so we never reconstruct the artifact name.
-          PROXY="${{ steps.deploy.outputs.proxy }}"
           if [ -z "$PROXY" ]; then
             echo "::warning::no proxy address from the deploy step; skipping verification"
             exit 0
@@ -218,6 +219,10 @@ jobs:
         if: ${{ always() && steps.deps.outcome == 'success' }}
         env:
           DEPLOYMENT_RPC_URL: ${{ secrets.DEPLOYMENT_RPC_URL }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
+          VERIFY_OUTCOME: ${{ steps.verify.outcome }}
+          POSTCHECK_OUTCOME: ${{ steps.postcheck.outcome }}
+          PROXY: ${{ steps.deploy.outputs.proxy }}
         run: |
           # Ensure a deploy-log + summary exists even when an earlier step failed.
           if [ ! -f deploy-log.json ]; then
@@ -229,21 +234,21 @@ jobs:
           {
             echo ""
             echo "### Step outcomes"
-            echo "- deploy: ${{ steps.deploy.outcome }}"
-            echo "- verify: ${{ steps.verify.outcome }}"
-            echo "- postcheck: ${{ steps.postcheck.outcome }}"
+            echo "- deploy: $DEPLOY_OUTCOME"
+            echo "- verify: $VERIFY_OUTCOME"
+            echo "- postcheck: $POSTCHECK_OUTCOME"
             echo ""
             echo "### Next steps"
             echo "1. Review the DAO registration calldata above and submit the governance proposal to register the wrapper."
             echo "2. Merge the auto-opened state PR so committed deployment state stays current (the next run reads committed state)."
             echo "3. Update docs/addresses/ with the new wrapper entry."
-            if [ "${{ steps.verify.outcome }}" = "failure" ] && [ -n "${{ steps.deploy.outputs.proxy }}" ]; then
+            if [ "$VERIFY_OUTCOME" = "failure" ] && [ -n "$PROXY" ]; then
               echo ""
               echo "### Re-run verification"
               echo "Etherscan verification did not complete — deploy is fine. From \`contracts/confidential-wrapper\`:"
               echo ""
               echo '```bash'
-              echo "npx hardhat task:verifyConfidentialWrapper --proxy-address ${{ steps.deploy.outputs.proxy }} --network ${NETWORK}"
+              echo "npx hardhat task:verifyConfidentialWrapper --proxy-address $PROXY --network ${NETWORK}"
               echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
@@ -265,8 +270,10 @@ jobs:
         # Runs after artifacts are uploaded and the state PR job is scheduled, so
         # a postcheck failure turns the job red without losing recovery state.
         if: ${{ always() && steps.deps.outcome == 'success' }}
+        env:
+          POSTCHECK_OUTCOME: ${{ steps.postcheck.outcome }}
         run: |
-          if [ "${{ steps.postcheck.outcome }}" == "failure" ]; then
+          if [ "$POSTCHECK_OUTCOME" = "failure" ]; then
             echo "::error::post-deploy checks failed — see the summary. Deployment state is preserved (artifact + state PR)."
             exit 1
           fi

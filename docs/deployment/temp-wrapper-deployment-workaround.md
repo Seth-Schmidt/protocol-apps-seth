@@ -92,7 +92,7 @@ Record the proxy address for every wrapper.
 
 ## Step 3 — Verify on Etherscan
 
-This verifies both the proxy and the V1 implementation. See the note in the main runbook's [Step 3](./deploy-wrapper-runbook.md#step-3--verify-on-etherscan) about duplicate-verification notices when multiple wrappers share an implementation.
+This verifies both the proxy and the V1 implementation. See the note in the main runbook's [Verify on Etherscan](./deploy-wrapper-runbook.md#verify-on-etherscan) about duplicate-verification notices when multiple wrappers share an implementation.
 
 **Batch:**
 
