@@ -10,6 +10,7 @@
 #   - DEPLOYMENT_RPC_URL is a single per-environment secret, step-level env only.
 #   - The PR-opening job (contents: write) is separate and never sees PRIVATE_KEY.
 name: contracts-confidential-wrapper-deploy
+run-name: 'Deploy wrapper ${{ inputs.target }} ${{ inputs.underlying }}'
 
 on:
   workflow_dispatch:
