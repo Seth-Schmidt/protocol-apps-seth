@@ -63,9 +63,10 @@ task('test', 'Runs the test suite with environment variables from .env.example')
 
 const config: HardhatUserConfig = {
   solidity: {
-    // 0.8.27 first: Hardhat picks the first matching compiler for `^0.8.27` pragmas, so deploys
-    // stay on 0.8.27. 0.8.29 is also listed so hardhat-verify can match OZ upgrades-core's
-    // precompiled ERC1967Proxy (bundled at 0.8.29) without CompilerVersionsMismatchError.
+    // Hardhat picks the highest compiler matching a pragma, so listing 0.8.29 for
+    // hardhat-verify (OZ's precompiled ERC1967Proxy is 0.8.29) would also bump our
+    // ^0.8.27 impls. Pin ConfidentialWrapper via overrides; keep 0.8.29 in compilers
+    // so verify can match the proxy bytecode without CompilerVersionsMismatchError.
     compilers: [
       {
         version: '0.8.27',
@@ -88,6 +89,18 @@ const config: HardhatUserConfig = {
         },
       },
     ],
+    overrides: {
+      'contracts/ConfidentialWrapper.sol': {
+        version: '0.8.27',
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 800,
+          },
+          evmVersion: 'cancun',
+        },
+      },
+    },
   },
   networks: {
     // Networks are named by chain (tier is a deploy-params grouping, not a Hardhat network). CI
