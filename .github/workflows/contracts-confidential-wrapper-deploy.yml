@@ -301,8 +301,8 @@ jobs:
             contracts/confidential-wrapper/.openzeppelin/*.json
           branch: deploy/wrapper-${{ inputs.target }}-${{ inputs.underlying }}-${{ github.run_id }}
           base: main
-          commit-message: 'chore: persist ${{ needs.deploy.outputs.symbol }} (${{ inputs.underlying }}) deploy state (${{ inputs.target }})'
-          title: 'chore: persist ${{ needs.deploy.outputs.symbol }} (${{ inputs.underlying }}) deploy state (${{ inputs.target }})'
+          commit-message: 'chore: persist ${{ needs.deploy.outputs.symbol }} deploy state (${{ inputs.target }})'
+          title: 'chore: persist ${{ needs.deploy.outputs.symbol }} deploy state (${{ inputs.target }})'
           body: |
             Automated deployment-state commit from run
             [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
