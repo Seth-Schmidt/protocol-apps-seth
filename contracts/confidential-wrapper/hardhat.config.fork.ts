@@ -36,7 +36,8 @@ if (FORK_BLOCK_NUMBER != null && FORK_BLOCK_NUMBER.trim() !== '') {
 
 const config: HardhatUserConfig = {
   solidity: {
-    version: '0.8.27',
+    // Match the deployed compiler (0.8.29) so fork-based upgrade tests mirror on-chain bytecode.
+    version: '0.8.29',
     settings: {
       optimizer: {
         enabled: true,

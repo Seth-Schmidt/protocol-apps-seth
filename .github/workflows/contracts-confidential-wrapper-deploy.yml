@@ -26,11 +26,6 @@ on:
         description: 'Underlying ERC-20 address (0x…), which must have an entry in deploy-params/<tier>/<network>/wrappers.json'
         type: string
         required: true
-      force_redeploy:
-        description: 'Deploy a new proxy even if one already exists for this wrapper symbol in committed state (does not bypass the registry one-wrapper-per-token check)'
-        type: boolean
-        default: false
-        required: false
 
 permissions: {}
 
@@ -170,7 +165,6 @@ jobs:
       - name: Preflight
         env:
           DEPLOYMENT_RPC_URL: ${{ secrets.DEPLOYMENT_RPC_URL }}
-          FORCE_REDEPLOY: ${{ inputs.force_redeploy }}
           DEPLOYER_ADDRESS: ${{ steps.signer.outputs.address }}
         run: |
           npx hardhat task:preflightConfidentialWrapper \
