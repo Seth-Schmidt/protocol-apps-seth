@@ -135,8 +135,9 @@ jobs:
 
       # --- Deploy pipeline -------------------------------------------------
       - name: Check params entry exists
-        # Fail fast (before the expensive compile) if wrappers.json has no entry for this
-        # underlying (checksum-insensitive). Args passed as argv, never interpolated. Deploy re-validates.
+        # Fail fast (before the expensive compile) if wrappers.json has no entry whose `underlying`
+        # matches (checksum-insensitive). Entries are keyed by wrapper symbol. Args passed as argv,
+        # never interpolated. Deploy re-validates.
         run: |
           node -e '
             const fs = require("fs");
@@ -144,9 +145,9 @@ jobs:
             const file = `deploy-params/${tier}/${network}/wrappers.json`;
             if (!fs.existsSync(file)) { console.error(`::error::${file} not found — add it and merge before deploying`); process.exit(1); }
             const entries = JSON.parse(fs.readFileSync(file, "utf8"));
-            const key = Object.keys(entries).find(k => k.toLowerCase() === underlying);
-            if (!key) { console.error(`::error::${file} has no entry for underlying ${underlying} — add it and merge before deploying`); process.exit(1); }
-            console.log(`Using ${file} → ${key}`);
+            const match = Object.entries(entries).find(([, e]) => e && typeof e.underlying === "string" && e.underlying.toLowerCase() === underlying);
+            if (!match) { console.error(`::error::${file} has no entry with underlying ${underlying} — add it and merge before deploying`); process.exit(1); }
+            console.log(`Using ${file} → ${match[0]} (${match[1].underlying})`);
           ' "$TIER" "$NETWORK" "$UNDERLYING"
 
       - name: Compile

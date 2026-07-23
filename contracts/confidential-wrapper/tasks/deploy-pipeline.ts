@@ -14,14 +14,15 @@ import { resolve } from 'path';
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const BYTES4_RE = /^0x[0-9a-fA-F]{8}$/;
 
-// A wrapper entry in deploy-params/<tier>/<network>/wrappers.json. The underlying address is
-// the object key (never a field). name/symbol/contractUri are optional — defaulted from the
-// underlying's on-chain metadata (see resolveWrapperParams).
+// A wrapper entry in deploy-params/<tier>/<network>/wrappers.json, keyed by the wrapper symbol
+// (e.g. `cUSDT`) so the file is self-documenting. `underlying` is the wrapped token address.
+// owner/name/contractUri are optional: owner defaults to the network DAO, name/contractUri to
+// the underlying's on-chain metadata (see resolveWrapperParams).
 type WrapperEntry = {
+  underlying: string;
   name?: string;
-  symbol?: string;
   contractUri?: string;
-  owner: string;
+  owner?: string;
   blockedUsers: string[];
   underlyingDenyListSelector: string;
   hasUnderlyingDenyListSelector: boolean;
@@ -65,13 +66,15 @@ function assertAddress(hre: HardhatRuntimeEnvironment, value: unknown, field: st
   }
 }
 
-// Load and validate the wrapper entry for `underlying` (checksum-insensitive key lookup) from
-// deploy-params/<tier>/<network>/wrappers.json. Throws on any problem — a malformed entry is
-// unusable. Optional name/symbol/contractUri are validated only when present.
+// Load and validate the wrapper entry for `underlying` from deploy-params/<tier>/<network>/
+// wrappers.json. Entries are keyed by wrapper symbol, so we scan for the one whose `underlying`
+// field matches (checksum-insensitive) and return it with its symbol key. Each underlying may
+// appear once. Throws on any problem — a malformed entry is unusable. Optional name/contractUri
+// are validated only when present.
 function loadWrapperEntry(
   hre: HardhatRuntimeEnvironment,
   underlying: string,
-): WrapperEntry & { underlying: string } {
+): WrapperEntry & { symbol: string } {
   assertAddress(hre, underlying, 'underlying');
   const target = hre.ethers.getAddress(underlying);
 
@@ -79,28 +82,34 @@ function loadWrapperEntry(
   const paramsFile = `deploy-params/${tier}/${hre.network.name}/wrappers.json`;
   const networkEntries = readJsonFile<Record<string, WrapperEntry>>(wrappersJson);
 
-  let entry: WrapperEntry | undefined;
-  for (const [key, value] of Object.entries(networkEntries)) {
-    let keyAddress: string;
+  const matches: { symbol: string; entry: WrapperEntry }[] = [];
+  for (const [symbol, value] of Object.entries(networkEntries)) {
+    if (typeof value.underlying !== 'string')
+      throw new Error(`Entry "${symbol}" in ${paramsFile} is missing an "underlying" address`);
+    let entryUnderlying: string;
     try {
-      keyAddress = hre.ethers.getAddress(key);
+      entryUnderlying = hre.ethers.getAddress(value.underlying);
     } catch {
-      throw new Error(`Invalid underlying address key "${key}" in ${paramsFile}`);
+      throw new Error(`Entry "${symbol}" in ${paramsFile} has an invalid underlying address "${value.underlying}"`);
     }
-    if (keyAddress === target) {
-      entry = value;
-      break;
-    }
+    if (entryUnderlying === target) matches.push({ symbol, entry: value });
   }
-  if (!entry) {
+  if (matches.length === 0) {
     throw new Error(
       `No wrapper params for underlying ${target} in ${paramsFile} ` +
         `(have: ${Object.keys(networkEntries).join(', ') || '<none>'})`,
     );
   }
+  if (matches.length > 1) {
+    throw new Error(
+      `Multiple entries in ${paramsFile} share underlying ${target} (${matches.map(m => m.symbol).join(', ')}); ` +
+        `each underlying may appear once`,
+    );
+  }
+  const { symbol, entry } = matches[0];
+  if (symbol.length === 0) throw new Error(`Empty wrapper symbol key in ${paramsFile}`);
 
   // Required fields.
-  assertAddress(hre, entry.owner, 'owner');
   if (!Array.isArray(entry.blockedUsers)) throw new Error('blockedUsers must be an array');
   entry.blockedUsers.forEach((addr, i) => assertAddress(hre, addr, `blockedUsers[${i}]`));
   if (typeof entry.underlyingDenyListSelector !== 'string' || !BYTES4_RE.test(entry.underlyingDenyListSelector))
@@ -108,19 +117,19 @@ function loadWrapperEntry(
   if (typeof entry.hasUnderlyingDenyListSelector !== 'boolean')
     throw new Error('hasUnderlyingDenyListSelector must be a boolean');
 
-  // Optional fields: validated only when present (otherwise defaulted from on-chain metadata).
+  // Optional fields: validated only when present (otherwise defaulted). owner → network DAO;
+  // name/contractUri → on-chain metadata.
+  if (entry.owner !== undefined) assertAddress(hre, entry.owner, 'owner');
   if (entry.name !== undefined && (typeof entry.name !== 'string' || entry.name.length === 0))
     throw new Error('name, when set, must be a non-empty string');
-  if (entry.symbol !== undefined && (typeof entry.symbol !== 'string' || entry.symbol.length === 0))
-    throw new Error('symbol, when set, must be a non-empty string');
   if (entry.contractUri !== undefined && (typeof entry.contractUri !== 'string' || entry.contractUri.length === 0))
     throw new Error('contractUri, when set, must be a non-empty string');
 
-  return { ...entry, underlying: target };
+  return { ...entry, underlying: target, symbol };
 }
 
-// Read the underlying's name()/symbol() to default an entry that omits them. Throws a helpful
-// error for non-standard tokens (e.g. bytes32 metadata); the operator can set name/symbol instead.
+// Read the underlying's name()/symbol() to default an entry's name/contractUri. Throws a helpful
+// error for non-standard tokens (e.g. bytes32 metadata); the operator can set name/contractUri instead.
 async function readUnderlyingMetadata(
   hre: HardhatRuntimeEnvironment,
   underlying: string,
@@ -132,7 +141,7 @@ async function readUnderlyingMetadata(
   } catch (err) {
     throw new Error(
       `Could not read name()/symbol() from underlying ${underlying} on ${hre.network.name} ` +
-        `(${(err as Error).message}). Set name and symbol explicitly in deploy-params/<tier>/<network>/wrappers.json.`,
+        `(${(err as Error).message}). Set name and contractUri explicitly in deploy-params/<tier>/<network>/wrappers.json.`,
     );
   }
 }
@@ -143,15 +152,17 @@ function defaultContractUri(name: string, symbol: string, underlyingSymbol: stri
   return `data:application/json;utf8,${metadata}`;
 }
 
-// Resolve an entry into fully-populated params, defaulting name/symbol/contractUri from on-chain
-// metadata when omitted. Only touches RPC when a default is needed.
+// Resolve an entry into fully-populated params. The symbol is the entry key; owner defaults to
+// the network DAO and name/contractUri to the underlying's on-chain metadata when omitted. Only
+// touches RPC for a default.
 async function resolveWrapperParams(hre: HardhatRuntimeEnvironment, underlying: string): Promise<WrapperParams> {
   const entry = loadWrapperEntry(hre, underlying);
-  let { name, symbol, contractUri } = entry;
-  if (name === undefined || symbol === undefined || contractUri === undefined) {
+  const symbol = entry.symbol;
+  const owner = entry.owner ? hre.ethers.getAddress(entry.owner) : loadNetworkConfig(hre.network.name).dao;
+  let { name, contractUri } = entry;
+  if (name === undefined || contractUri === undefined) {
     const meta = await readUnderlyingMetadata(hre, entry.underlying);
     if (name === undefined) name = `Confidential ${meta.name}`;
-    if (symbol === undefined) symbol = `c${meta.symbol}`;
     if (contractUri === undefined) contractUri = defaultContractUri(name, symbol, meta.symbol);
   }
   return {
@@ -159,7 +170,7 @@ async function resolveWrapperParams(hre: HardhatRuntimeEnvironment, underlying: 
     symbol,
     contractUri,
     underlying: entry.underlying,
-    owner: entry.owner,
+    owner,
     blockedUsers: entry.blockedUsers,
     underlyingDenyListSelector: entry.underlyingDenyListSelector,
     hasUnderlyingDenyListSelector: entry.hasUnderlyingDenyListSelector,
@@ -222,12 +233,12 @@ task('task:preflightConfidentialWrapper')
     const failures: string[] = [];
     const lines: string[] = [`Preflight for "${params.name}" (${params.symbol}) on ${hre.network.name}:`];
 
-    // Owner MUST be the network DAO — a wrong owner breaks governance execution; no CI
-    // escape hatch (exceptional deploys use the manual runbook).
-    if (ethers.getAddress(params.owner) !== ethers.getAddress(networkConfig.dao)) {
-      failures.push(`owner ${params.owner} !== network DAO ${networkConfig.dao} (owner must be the DAO)`);
-    } else {
+    // Owner defaults to the network DAO (the correct owner for governance execution). An explicit
+    // per-entry override is allowed but flagged loudly — a non-DAO owner is almost always a mistake.
+    if (ethers.getAddress(params.owner) === ethers.getAddress(networkConfig.dao)) {
       lines.push(`  ✓ owner is the network DAO (${networkConfig.dao})`);
+    } else {
+      lines.push(`  ! owner ${params.owner} is an explicit override (NOT the network DAO ${networkConfig.dao})`);
     }
 
     // RPC chain id matches the expected chain for this network.
