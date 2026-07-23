@@ -193,33 +193,10 @@ jobs:
             exit 0
           fi
           echo "Proxy address: $PROXY"
-          # An empty key drops hardhat-verify to Etherscan's ~3/sec unauthenticated tier.
           if [ -z "${ETHERSCAN_API_KEY:-}" ]; then
             echo "::warning::ETHERSCAN_API_KEY is empty in the ${TIER}-${NETWORK}-deploy environment; verification will likely be rate-limited. Deploy is unaffected."
           fi
-          # Minimal retry around Etherscan indexing lag: 10s increments capped at 30s.
-          for attempt in 1 2 3 4 5; do
-            set +e
-            out=$(npx hardhat task:verifyConfidentialWrapper --proxy-address "$PROXY" --network "$NETWORK" 2>&1)
-            rc=$?
-            set -e
-            echo "$out"
-            if [ "$rc" -eq 0 ]; then
-              echo "Verification succeeded on attempt $attempt"
-              exit 0
-            fi
-            if echo "$out" | grep -qiE "proxy ${PROXY}.*already.*verified|already.*verified.*proxy ${PROXY}"; then
-              echo "Proxy already verified; treating as success."
-              exit 0
-            fi
-            if [ "$attempt" -lt 5 ]; then
-              delay=$((attempt * 10)); [ "$delay" -gt 30 ] && delay=30
-              echo "Verify attempt $attempt failed; retrying in ${delay}s..."
-              sleep "$delay"
-            fi
-          done
-          echo "::warning::Etherscan verification did not complete — deploy is fine; re-run: npx hardhat task:verifyConfidentialWrapper --proxy-address ${PROXY} --network ${NETWORK}"
-          exit 1
+          npx hardhat task:verifyConfidentialWrapper --proxy-address "$PROXY" --network "$NETWORK"
 
       - name: Post-deploy checks
         id: postcheck
