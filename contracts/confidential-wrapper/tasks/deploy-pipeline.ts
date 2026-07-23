@@ -1,5 +1,5 @@
 import { CONTRACT_NAME, getConfidentialWrapperProxyName, resolveDeployerAddress } from './deploy';
-import { loadNetworkConfig, networkParamsPaths, readJsonFile } from './utils/deployParams';
+import { findWrapperByUnderlying, loadNetworkConfig } from './utils/deployParams';
 import { getVersion, Manifest } from '@openzeppelin/upgrades-core';
 import { execSync } from 'child_process';
 import { appendFileSync, writeFileSync } from 'fs';
@@ -67,10 +67,8 @@ function assertAddress(hre: HardhatRuntimeEnvironment, value: unknown, field: st
 }
 
 // Load and validate the wrapper entry for `underlying` from deploy-params/<tier>/<network>/
-// wrappers.json. Entries are keyed by wrapper symbol, so we scan for the one whose `underlying`
-// field matches (checksum-insensitive) and return it with its symbol key. Each underlying may
-// appear once. Throws on any problem — a malformed entry is unusable. Optional name/contractUri
-// are validated only when present.
+// wrappers.json. Lookup is checksum-insensitive (see findWrapperByUnderlying); full field
+// validation happens here. Optional name/contractUri are validated only when present.
 function loadWrapperEntry(
   hre: HardhatRuntimeEnvironment,
   underlying: string,
@@ -78,36 +76,19 @@ function loadWrapperEntry(
   assertAddress(hre, underlying, 'underlying');
   const target = hre.ethers.getAddress(underlying);
 
-  const { tier, wrappersJson } = networkParamsPaths(hre.network.name);
-  const paramsFile = `deploy-params/${tier}/${hre.network.name}/wrappers.json`;
-  const networkEntries = readJsonFile<Record<string, WrapperEntry>>(wrappersJson);
+  const { symbol, entry: raw, paramsFile } = findWrapperByUnderlying(hre.network.name, underlying);
 
-  const matches: { symbol: string; entry: WrapperEntry }[] = [];
-  for (const [symbol, value] of Object.entries(networkEntries)) {
-    if (typeof value.underlying !== 'string')
-      throw new Error(`Entry "${symbol}" in ${paramsFile} is missing an "underlying" address`);
-    let entryUnderlying: string;
-    try {
-      entryUnderlying = hre.ethers.getAddress(value.underlying);
-    } catch {
-      throw new Error(`Entry "${symbol}" in ${paramsFile} has an invalid underlying address "${value.underlying}"`);
-    }
-    if (entryUnderlying === target) matches.push({ symbol, entry: value });
+  let entryUnderlying: string;
+  try {
+    entryUnderlying = hre.ethers.getAddress(raw.underlying);
+  } catch {
+    throw new Error(`Entry "${symbol}" in ${paramsFile} has an invalid underlying address "${raw.underlying}"`);
   }
-  if (matches.length === 0) {
-    throw new Error(
-      `No wrapper params for underlying ${target} in ${paramsFile} ` +
-        `(have: ${Object.keys(networkEntries).join(', ') || '<none>'})`,
-    );
+  if (entryUnderlying !== target) {
+    throw new Error(`Entry "${symbol}" in ${paramsFile} underlying mismatch after checksum normalize`);
   }
-  if (matches.length > 1) {
-    throw new Error(
-      `Multiple entries in ${paramsFile} share underlying ${target} (${matches.map(m => m.symbol).join(', ')}); ` +
-        `each underlying may appear once`,
-    );
-  }
-  const { symbol, entry } = matches[0];
-  if (symbol.length === 0) throw new Error(`Empty wrapper symbol key in ${paramsFile}`);
+
+  const entry = raw as WrapperEntry;
 
   // Required fields.
   if (!Array.isArray(entry.blockedUsers)) throw new Error('blockedUsers must be an array');
@@ -222,6 +203,24 @@ task('task:printDeployerAddress').setAction(async function (_, hre) {
     appendFileSync(process.env.GITHUB_OUTPUT, `address=${address}\n`);
   }
 });
+
+// task:checkParamsEntry — fail-fast CI preflight: wrappers.json must have a matching underlying.
+// Writes `symbol=<key>` to $GITHUB_OUTPUT for the state PR title/commit. No RPC.
+task('task:checkParamsEntry')
+  .addParam('underlying', 'Underlying ERC-20 address; selects the entry in deploy-params/<tier>/<network>/wrappers.json', undefined, types.string)
+  .setAction(async function ({ underlying }, hre) {
+    try {
+      const { symbol, entry, paramsFile } = findWrapperByUnderlying(hre.network.name, underlying);
+      console.log(`Using ${paramsFile} → ${symbol} (${entry.underlying})`);
+      if (process.env.GITHUB_OUTPUT) {
+        appendFileSync(process.env.GITHUB_OUTPUT, `symbol=${symbol}\n`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`::error::${msg}`);
+      throw err;
+    }
+  });
 
 // task:preflightConfidentialWrapper — read-only validation gate run before broadcasting.
 task('task:preflightConfidentialWrapper')
