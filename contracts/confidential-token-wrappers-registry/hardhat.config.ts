@@ -84,6 +84,11 @@ const config: HardhatUserConfig = {
       url: process.env.SEPOLIA_RPC_URL || '',
       accounts,
     },
+    'polygon-amoy': {
+      url: process.env.AMOY_RPC_URL || '',
+      accounts,
+      chainId: 80002,
+    },
     hardhat: {
       saveDeployments: false,
     },
