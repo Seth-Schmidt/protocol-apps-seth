@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause-Clear
 pragma solidity ^0.8.27;
 
-import {externalEuint64, euint64} from "@fhevm/solidity/lib/FHE.sol";
+import {FHE, externalEuint64, euint64} from "@fhevm/solidity/lib/FHE.sol";
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {ERC7984ERC20WrapperUpgradeable} from "./extensions/ERC7984ERC20WrapperUpgradeable.sol";
 import {ZamaEthereumConfigUpgradeable} from "./fhevm/ZamaEthereumConfigUpgradeable.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {Initializable} from "@openzeppelin/contracts/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 
@@ -27,6 +29,8 @@ contract ConfidentialWrapper is
     UUPSUpgradeable,
     Ownable2StepUpgradeable
 {
+    using EnumerableSet for EnumerableSet.AddressSet;
+
     /// @dev to persist context of the unwrap between the unwrap and the finalizeUnwrap calls
     struct UnwrapContext {
         address from;
@@ -39,6 +43,7 @@ contract ConfidentialWrapper is
         mapping(bytes32 unwrapRequestId => UnwrapContext unwrapContext) _unwrapContexts;
         bytes4 _underlyingDenyListSelector;
         bool _hasUnderlyingDenyListSelector;
+        EnumerableSet.AddressSet _observers;
     }
 
     // keccak256(abi.encode(uint256(keccak256("fhevm_protocol.storage.ConfidentialWrapperV3")) - 1)) & ~bytes32(uint256(0xff))
@@ -69,13 +74,42 @@ contract ConfidentialWrapper is
     /// @dev Thrown when the underlying denylist call returns a true value for the given address.
     error UnderlyingDenyListedAddress(address user);
 
-    /// Constant used for making sure the version number used in the `reinitializer` modifier is
-    /// identical between `initialize` and `reinitializeV3`.
-    uint64 private constant REINITIALIZER_VERSION = 3;
+    /// @dev Emitted when `observer` is granted wildcard user-decryption access.
+    event ObserverAdded(address indexed observer);
+
+    /// @dev Emitted when `observer` has wildcard user-decryption access revoked.
+    event ObserverRemoved(address indexed observer);
+
+    /// @dev Thrown when `observer` cannot be configured as an observer.
+    error InvalidObserver(address observer);
+
+    /// @dev Thrown when attempting to add an observer that is already configured.
+    error ObserverAlreadyConfigured(address observer);
+
+    /// @dev Thrown when attempting to remove or renounce an observer that is not configured.
+    error ObserverNotConfigured(address observer);
+
+    /// @dev ACL sentinel for delegating user-decryption access across all wrapper-owned handles.
+    address public constant WILDCARD_CONTRACT = 0xFFfFfFffFFfffFFfFFfFFFFFffFFFffffFfFFFfF;
+
+    /// @dev Every initializer entry point advances straight to this version, so the contract only
+    /// ever rests in one of two states: freshly deployed via {initialize}, or upgraded via
+    /// {reinitializeV4}. Leaving a lower intermediate version reachable would let anyone call
+    /// {initialize} on an already-owned proxy and seize ownership.
+    uint64 private constant REINITIALIZER_VERSION = 4;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
+    }
+
+    /// @dev Restricts a call to a freshly deployed proxy whose initializer version is still zero.
+    /// Must run before {reinitializer}, which bumps the stored version before the function body executes.
+    modifier onlyOnDeployment() {
+        if (_getInitializedVersion() != 0) {
+            revert Initializable.InvalidInitialization();
+        }
+        _;
     }
 
     function _getConfidentialWrapperV3Storage() internal pure returns (ConfidentialWrapperV3Storage storage $) {
@@ -86,7 +120,8 @@ contract ConfidentialWrapper is
 
     /**
      * @notice Initializes the contract when deployed behind an empty proxy.
-     * @dev Advances the initializer version to {REINITIALIZER_VERSION} so older reinitializers cannot be replayed.
+     * @dev Guarded by {onlyOnDeployment} so it can only run on a proxy whose initializer version is
+     * still zero. Advances the initializer version to V4 so older reinitializers cannot be replayed.
      */
     /// @custom:oz-upgrades-validate-as-initializer
     function initialize(
@@ -97,26 +132,24 @@ contract ConfidentialWrapper is
         address owner_,
         address[] memory blockedUsers,
         bytes4 underlyingDenyListSelector,
-        bool hasUnderlyingDenyListSelector_
-    ) public virtual reinitializer(REINITIALIZER_VERSION) {
+        bool hasUnderlyingDenyListSelector_,
+        address[] memory initialObservers
+    ) public virtual onlyOnDeployment reinitializer(REINITIALIZER_VERSION) {
         __ConfidentialWrapper_init(name_, symbol_, contractURI_, underlying_, owner_);
         __ConfidentialWrapperV3_init(blockedUsers, underlyingDenyListSelector, hasUnderlyingDenyListSelector_);
+        __ConfidentialWrapperV4_init(initialObservers);
     }
 
     /**
-     * @notice Re-initializes the contract from V2.
-     * @dev Define a `reinitializeVX` function once the contract needs to be upgraded.
-     * Optionally seeds the denylist with `blockedUsers`.
-     * Reverts if any entry in `blockedUsers` appears more than once.
+     * @notice Re-initializes the contract from V3. Optionally seeds the observer set with
+     * `initialObservers`; reverts if the array contains a duplicate.
+     * @dev Seeds V4 state only, calling this directly from V1/V2 skips the V3
+     * initializer, leaving the underlying deny-list check disabled.
      */
     /// @custom:oz-upgrades-unsafe-allow missing-initializer-call
     /// @custom:oz-upgrades-validate-as-initializer
-    function reinitializeV3(
-        address[] memory blockedUsers,
-        bytes4 underlyingDenyListSelector,
-        bool hasUnderlyingDenyListSelector_
-    ) public virtual reinitializer(REINITIALIZER_VERSION) {
-        __ConfidentialWrapperV3_init(blockedUsers, underlyingDenyListSelector, hasUnderlyingDenyListSelector_);
+    function reinitializeV4(address[] memory initialObservers) public virtual onlyOwner reinitializer(REINITIALIZER_VERSION) {
+        __ConfidentialWrapperV4_init(initialObservers);
     }
 
     function __ConfidentialWrapper_init(
@@ -152,6 +185,18 @@ contract ConfidentialWrapper is
         $._hasUnderlyingDenyListSelector = hasUnderlyingDenyListSelector_;
     }
 
+    /**
+     * @dev V4-specific initialization logic. Optionally seeds observers.
+     * Reverts if any observer entry appears more than once.
+     */
+    /// @custom:oz-upgrades-unsafe-allow missing-initializer-call
+    function __ConfidentialWrapperV4_init(address[] memory initialObservers) internal onlyInitializing {
+        uint256 length = initialObservers.length;
+        for (uint256 i = 0; i < length; i++) {
+            _addObserver(initialObservers[i]);
+        }
+    }
+
     /// @dev Adds `user` to the denylist.
     function blockUser(address user) external virtual onlyOwner {
         _blockUser(user);
@@ -177,6 +222,41 @@ contract ConfidentialWrapper is
         return ($._hasUnderlyingDenyListSelector, $._underlyingDenyListSelector);
     }
 
+    /// @dev Adds `observer` and grants wildcard user-decryption access to wrapper-owned handles.
+    function addObserver(address observer) external virtual onlyOwner {
+        _addObserver(observer);
+    }
+
+    /// @dev Removes `observer` and revokes wildcard user-decryption access to wrapper-owned handles.
+    function removeObserver(address observer) external virtual onlyOwner {
+        _removeObserver(observer);
+    }
+
+    /// @dev Allows an observer to revoke their own wildcard user-decryption access.
+    function renounceObserver() external virtual {
+        _removeObserver(msg.sender);
+    }
+
+    /// @dev Returns whether `observer` is currently configured.
+    function isObserver(address observer) public view virtual returns (bool) {
+        return _getConfidentialWrapperV3Storage()._observers.contains(observer);
+    }
+
+    /// @dev Returns the observer at `index`.
+    function observerAt(uint256 index) public view virtual returns (address) {
+        return _getConfidentialWrapperV3Storage()._observers.at(index);
+    }
+
+    /// @dev Returns the number of configured observers.
+    function observerCount() public view virtual returns (uint256) {
+        return _getConfidentialWrapperV3Storage()._observers.length();
+    }
+
+    /// @dev Returns all configured observers.
+    function observers() public view virtual returns (address[] memory) {
+        return _getConfidentialWrapperV3Storage()._observers.values();
+    }
+
     function _blockUser(address user) internal virtual {
         ConfidentialWrapperV3Storage storage $ = _getConfidentialWrapperV3Storage();
         require(!$._blockedUsers[user], UserAlreadyBlocked(user));
@@ -189,6 +269,28 @@ contract ConfidentialWrapper is
         require($._blockedUsers[user], UserAlreadyUnblocked(user));
         $._blockedUsers[user] = false;
         emit UserUnblocked(user);
+    }
+
+    function _addObserver(address observer) internal virtual {
+        if (observer == address(0) || observer == address(this) || observer == WILDCARD_CONTRACT) {
+            revert InvalidObserver(observer);
+        }
+
+        ConfidentialWrapperV3Storage storage $ = _getConfidentialWrapperV3Storage();
+        if (!$._observers.add(observer)) {
+            revert ObserverAlreadyConfigured(observer);
+        }
+
+        FHE.delegateUserDecryptionWithoutExpiration(observer, WILDCARD_CONTRACT);
+        emit ObserverAdded(observer);
+    }
+
+    function _removeObserver(address observer) internal virtual {
+        ConfidentialWrapperV3Storage storage $ = _getConfidentialWrapperV3Storage();
+        if ($._observers.remove(observer)) {
+            FHE.revokeUserDecryptionDelegation(observer, WILDCARD_CONTRACT);
+            emit ObserverRemoved(observer);
+        }
     }
 
     function _requireNotBlocked(address user) internal view {
