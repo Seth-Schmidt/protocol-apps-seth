@@ -14,10 +14,11 @@ Wraps standard ERC20 tokens into confidential ERC7984 tokens using FHE. Deployed
 
 | Variable | Description |
 | --- | --- |
-| `MNEMONIC` or `PRIVATE_KEY` | Authentication for the deployer account |
-| `MAINNET_RPC_URL` | RPC URL for mainnet |
-| `SEPOLIA_RPC_URL` | RPC URL for Sepolia testnet |
-| `ETHERSCAN_API_KEY` | Etherscan API key (required for contract verification) |
+| `MNEMONIC` or `PRIVATE_KEY` | Local signer for the deployer account |
+| `ETHEREUM_RPC_URL` | RPC URL for the `ethereum` network (mainnet) |
+| `SEPOLIA_RPC_URL` | RPC URL for the `sepolia` network (Sepolia testnet) |
+| `DEPLOYMENT_RPC_URL` | Optional. If set, overrides the per-network RPC URL for the active `--network` |
+| `ETHERSCAN_API_KEY` | Etherscan API key (required for Etherscan verification; Blockscout/Sourcify need none) |
 
 ### Task inputs (batch deployment)
 
@@ -29,7 +30,6 @@ Wraps standard ERC20 tokens into confidential ERC7984 tokens using FHE. Deployed
 | `CONFIDENTIAL_WRAPPER_CONTRACT_URI_{i}` | Contract URI metadata for the wrapper at index `i` |
 | `CONFIDENTIAL_WRAPPER_UNDERLYING_ADDRESS_{i}` | Address of the underlying ERC20 token for the wrapper at index `i` |
 | `CONFIDENTIAL_WRAPPER_OWNER_ADDRESS_{i}` | Owner address for the wrapper at index `i` |
-| `CONFIDENTIAL_WRAPPER_INITIAL_OBSERVERS_{i}` | Optional JSON array of observer addresses to seed during initialization |
 
 ### Task inputs (batch deploy upgrade implementations)
 
@@ -95,7 +95,7 @@ Each wrapper must also provide the V3 initializer configuration:
 **Example:**
 
 ```bash
-npx hardhat task:deployAllConfidentialWrappers --network testnet
+npx hardhat task:deployAllConfidentialWrappers --network <network>
 ```
 
 ### `task:verifyConfidentialWrapper`
@@ -113,7 +113,7 @@ Verify a single confidential wrapper contract (both proxy and implementation) on
 ```bash
 npx hardhat task:verifyConfidentialWrapper \
   --proxy-address 0x1234567890123456789012345678901234567890 \
-  --network testnet
+  --network <network>
 ```
 
 ### `task:verifyAllConfidentialWrappers`
@@ -125,7 +125,7 @@ Verify all deployed confidential wrapper contracts on Etherscan. Reads wrapper n
 **Example:**
 
 ```bash
-npx hardhat task:verifyAllConfidentialWrappers --network testnet
+npx hardhat task:verifyAllConfidentialWrappers --network <network>
 ```
 
 ### `task:deployWrapperImplementation`
@@ -142,7 +142,7 @@ Deploy a new `ConfidentialWrapper` implementation contract without upgrading any
 **Example:**
 
 ```bash
-npx hardhat task:deployWrapperImplementation --name "Confidential USDT" --label "v2" --network testnet
+npx hardhat task:deployWrapperImplementation --name "Confidential USDT" --label "v2" --network <network>
 ```
 
 ### `task:deployAllWrapperImplementations`
@@ -156,7 +156,7 @@ Deploy upgrade implementations for all wrappers defined in the `.env` file. Read
 **Example:**
 
 ```bash
-npx hardhat task:deployAllWrapperImplementations --network testnet
+npx hardhat task:deployAllWrapperImplementations --network <network>
 ```
 
 ### `task:verifyWrapperImplementation`
@@ -172,7 +172,7 @@ Verify a single `ConfidentialWrapper` implementation contract on Etherscan.
 **Example:**
 
 ```bash
-npx hardhat task:verifyWrapperImplementation --address 0x1234567890123456789012345678901234567890 --network testnet
+npx hardhat task:verifyWrapperImplementation --address 0x1234567890123456789012345678901234567890 --network <network>
 ```
 
 ### `task:verifyAllWrapperImplementations`
@@ -184,8 +184,12 @@ Verify upgrade implementation contracts for all wrappers on Etherscan. Looks up 
 **Example:**
 
 ```bash
-npx hardhat task:verifyAllWrapperImplementations --network testnet
+npx hardhat task:verifyAllWrapperImplementations --network <network>
 ```
+
+## Params-driven pipeline (CI)
+
+The GitHub Actions workflow deploys from reviewed [`deploy-params/`](./deploy-params/) files rather than raw `.env` inputs. See the [deploy params schema](./deploy-params/SCHEMA.md) and the [deploy runbook](../../docs/deployment/deploy-wrapper-runbook.md) for the full process. The pipeline is built from these tasks:
 
 ## Scripts
 

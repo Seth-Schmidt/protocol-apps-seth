@@ -16,9 +16,8 @@ Before starting, collect the following for each wrapper being deployed:
 | Owner address for target chain (Protocol DAO) | [Addresses directory](https://github.com/zama-ai/protocol-apps/tree/main/docs/addresses) |
 | Denylist function selector (`bytes4`) | Underlying token contract ABI. Use `0x00000000` if the underlying has no denylist |
 | Initial blocked-users list (JSON array) | Compliance / legal. Use `'[]'` if none |
-| Initial observers list (JSON array) | Addresses authorized to decrypt confidential amounts on behalf of the wrapper. Use `'[]'` if none. See the observer scope warning below |
 | Contract URI JSON metadata | Follow the pattern `data:application/json;utf8,{"name":"...","symbol":"...","description":"..."}` |
-| `MNEMONIC` or `PRIVATE_KEY` for the deployer | DFNS / internal secrets |
+| Deployer signer | Local `MNEMONIC` or `PRIVATE_KEY` |
 | `ETHERSCAN_API_KEY` | Etherscan dashboard |
 | RPC URL for the target network | Infura / Alchemy / internal node / public endpoint |
 
@@ -72,9 +71,12 @@ Pick the option that matches your task:
 
 > ⚠️ **Do not use as-is.** Fresh V3 deployments are blocked until V4 ships. Follow [`temp-wrapper-deployment-workaround.md`](./temp-wrapper-deployment-workaround.md) instead.
 
-### Step 1 — Set up the environment
+### Step 1 — Deploy and verify the wrapper
 
-From the `contracts/confidential-wrapper` directory:
+Run the steps below from the `contracts/confidential-wrapper` directory. After a successful
+deploy and Etherscan verification, continue to **Step 2**.
+
+#### Set up the environment
 
 ```bash
 cp .env.example .env
@@ -87,7 +89,7 @@ Populate `.env` with all required values. For a batch of `N` wrappers (replace `
 ```dotenv
 # Auth
 MNEMONIC=                          # or PRIVATE_KEY=
-MAINNET_RPC_URL=
+ETHEREUM_RPC_URL=
 ETHERSCAN_API_KEY=
 
 NUM_CONFIDENTIAL_WRAPPERS=N
@@ -121,7 +123,7 @@ CONFIDENTIAL_WRAPPER_INITIAL_OBSERVERS_{i}=      # JSON array, e.g. '[]'. Requir
 **Batch (recommended when deploying multiple wrappers):**
 
 ```bash
-npx hardhat task:deployAllConfidentialWrappers --network mainnet
+npx hardhat task:deployAllConfidentialWrappers --network ethereum
 ```
 
 **Single wrapper:**
@@ -137,7 +139,7 @@ npx hardhat task:deployConfidentialWrapper \
   --owner 0xB6D69D5F334d8B97B194617B53c6aB62f8681Ef3 \
   --blocked-users '[]' \
   --underlying-deny-list-selector 0x59bf1abe \
-  --network mainnet
+  --network ethereum
 ```
 
 On success, each wrapper prints:
@@ -152,12 +154,12 @@ On success, each wrapper prints:
 
 Record the proxy address for every wrapper.
 
-### Step 3 — Verify on Etherscan
+#### Verify on Etherscan
 
 **Batch:**
 
 ```bash
-npx hardhat task:verifyAllConfidentialWrappers --network mainnet
+npx hardhat task:verifyAllConfidentialWrappers --network ethereum
 ```
 
 **Single:**
@@ -165,12 +167,12 @@ npx hardhat task:verifyAllConfidentialWrappers --network mainnet
 ```bash
 npx hardhat task:verifyConfidentialWrapper \
   --proxy-address <PROXY_ADDRESS> \
-  --network mainnet
+  --network ethereum
 ```
 
 This verifies both the proxy contract and the implementation contract. Since all wrappers share the same implementation bytecode, the implementation source will already be verified from the second wrapper onward. Etherscan will report a duplicate-verification notice, which is expected.
 
-### Step 4 — Register in the Wrappers Registry (DAO action)
+### Step 2 — Register in the Wrappers Registry (DAO action)
 
 The wrapper is not active until the Protocol DAO registers it. This is an onchain governance action and cannot be executed by the deployer.
 
@@ -185,13 +187,10 @@ registry.registerConfidentialToken(
 
 See the [Creating Ethereum Proposals](../governance/creating-proposals-ethereum.md) guide for help on creating a new proposal.
 
-### Step 5 — Update the addresses directory
+### Step 3 — Record addresses
 
-Open a PR on `zama-ai/protocol-apps` with an entry for each new wrapper in the appropriate file in `protocol-apps/docs/addresses/{network}/{chain}` under "Confidential Wrappers":
-
-```markdown
-| Confidential TOKEN | `cTOKEN` | [`0x...`](https://etherscan.io/address/0x...) | [`0x...`](https://etherscan.io/token/0x...) |
-```
+Update the `protocol-registry` repo with the deployed wrapper addresses (proxy +
+underlying ERC-20) for each new wrapper, and ping the repo owners to review and merge.
 
 ---
 
@@ -201,7 +200,7 @@ Upgrades are a two-phase process: the deployer deploys a new implementation cont
 
 ### Step 1 — Check for an existing implementation
 
-Before deploying, confirm whether a matching implementation for this version already exists. Check:
+Before deploying, confirm whether a matching implementation for this version already exists. Live-network deployment state (`deployments/<network>/` and `.openzeppelin/<network>.json`) is committed to the repo, so these checks work from a fresh clone. Check:
 
 - Existing wrapper deployments may have the implementation that you need already
 - `.openzeppelin/<network>.json` for an entry matching the current source.
@@ -220,14 +219,14 @@ Minimal `.env` required for this step:
 
 ```dotenv
 MNEMONIC=                          # or PRIVATE_KEY=
-MAINNET_RPC_URL=
+ETHEREUM_RPC_URL=
 ETHERSCAN_API_KEY=
 ```
 
 Deploy the implementation contract:
 
 ```bash
-npx hardhat task:deployConfidentialWrapperImpl --network mainnet
+npx hardhat task:deployConfidentialWrapperImpl --network ethereum
 ```
 
 The implementation is saved as `ConfidentialWrapper_Impl` in the deployments artifacts. Record the implementation address printed on success.
@@ -237,7 +236,7 @@ The implementation is saved as `ConfidentialWrapper_Impl` in the deployments art
 ```bash
 npx hardhat task:verifyConfidentialWrapperImpl \
   --impl-address <IMPL_ADDRESS> \
-  --network mainnet
+  --network ethereum
 ```
 
 ### Step 5 — Submit the DAO upgrade proposal
@@ -257,13 +256,19 @@ See the [Creating Ethereum Proposals](../governance/creating-proposals-ethereum.
 
 Use Foundry's `cast calldata` to ABI-encode the reinitializer call. Foundry must be installed. See the [Foundry docs](https://www.getfoundry.sh).
 
-For example, to get the calldata for a V4 wrapper with an initial observer set:
+No blocked users, underlying has no denylist:
 
 ```bash
-cast calldata "reinitializeV4(address[])" "[0xAddr1,0xAddr2]"
+cast calldata "reinitializeV3(address[],bytes4,bool)" "[]" "0x00000000" false
 ```
 
-Update the above command for the correct reinitializer version and function parameters for your wrapper, and then paste the returned hex string as `data (bytes)` in the proposal:
+With a blocked-users list and a denylist selector:
+
+```bash
+cast calldata "reinitializeV3(address[],bytes4,bool)" "[0xAddr1,0xAddr2]" "0xfe575a87" true
+```
+
+Paste the returned hex string as `data (bytes)` in the proposal:
 
 ![Bytes entry](images/wrapper-proposal-data-bytes.png)
 
