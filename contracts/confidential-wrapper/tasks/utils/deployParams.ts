@@ -27,6 +27,8 @@ export type WrapperParamsEntry = {
   blockedUsers?: unknown;
   underlyingDenyListSelector?: string;
   hasUnderlyingDenyListSelector?: unknown;
+  /** Optional V4 observers; defaults to [] when omitted. */
+  initialObservers?: unknown;
 };
 
 export function readJsonFile<T>(path: string): T {

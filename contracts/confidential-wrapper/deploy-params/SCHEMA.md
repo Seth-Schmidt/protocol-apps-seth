@@ -40,11 +40,12 @@ self-documenting; the wrapped token is the `underlying` field (no separate `symb
 | `blockedUsers`                  | address[] | yes      | Seeded into the denylist; `[]` if none                                                                   |
 | `underlyingDenyListSelector`    | bytes4    | yes      | `0x00000000` if none                                                                                     |
 | `hasUnderlyingDenyListSelector` | boolean   | yes      | Whether the selector is enabled                                                                          |
+| `initialObservers`              | address[] | optional | Seeded V4 observers; defaults to `[]`                                                                    |
 | `owner`                         | address   | optional | Defaults to the network `dao`; set only to intentionally use a non-DAO owner (preflight flags overrides) |
 | `name`                          | string    | optional | Default `Confidential <underlying symbol()>` (e.g. `Confidential USDC`)                                  |
 | `contractUri`                   | string    | optional | Default derived `data:` blob from name/symbol                                                            |
 
-Minimal entry (owner/name/contractUri defaulted):
+Minimal entry (owner/name/contractUri/initialObservers defaulted):
 
 ```json
 {

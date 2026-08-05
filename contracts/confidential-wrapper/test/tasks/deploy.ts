@@ -47,6 +47,11 @@ describe('ConfidentialWrapper Deployment', function () {
         const hasUnderlyingDenyListSelector = getRequiredBooleanEnvVar(
           `CONFIDENTIAL_WRAPPER_HAS_UNDERLYING_DENY_LIST_SELECTOR_${i}`,
         );
+        const initialObserversEnv = process.env[`CONFIDENTIAL_WRAPPER_INITIAL_OBSERVERS_${i}`];
+        const initialObservers =
+          initialObserversEnv === undefined || initialObserversEnv.trim() === ''
+            ? []
+            : (JSON.parse(initialObserversEnv) as string[]);
 
         // Get the deployed proxy contract (artifacts are keyed by symbol)
         const proxyDeployment = await hre.deployments.get(getConfidentialWrapperProxyName(symbol));
@@ -67,6 +72,7 @@ describe('ConfidentialWrapper Deployment', function () {
         const [isSet, selector] = await confidentialWrapper.getUnderlyingDenyListSelector();
         expect(isSet).to.equal(hasUnderlyingDenyListSelector);
         expect(selector).to.equal(underlyingDenyListSelector);
+        expect(await confidentialWrapper.observers()).to.deep.equal(initialObservers);
       }
     });
   });

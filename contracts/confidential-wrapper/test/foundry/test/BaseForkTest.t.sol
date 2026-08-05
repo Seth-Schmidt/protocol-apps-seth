@@ -38,7 +38,8 @@ abstract contract BaseForkTest is FhevmTest {
     bytes32 internal constant WRAPPER_STORAGE_BASE = 0x789981291a45bfde11e7ba326d04f33e2215f03c85dfc0acebcc6167a5924700;
     /// @dev CoprocessorConfig ERC-7201 base in the wrapper (acl, coprocessor, kmsVerifier at +0/+1/+2).
     bytes32 internal constant FHEVM_CONFIG_BASE = 0x9e7b61f58c47dc699ac88507c4f5bb9f121c03808c5676a8078fe583e4649700;
-    /// @dev ConfidentialWrapperV3 ERC-7201 storage base (blocked users, unwrap contexts, underlying deny-list config).
+    /// @dev ConfidentialWrapperV3 ERC-7201 storage base (blocked users, unwrap contexts, underlying deny-list
+    /// config, pauser).
     bytes32 internal constant CONFIDENTIAL_WRAPPER_V3_STORAGE_BASE =
         0xfbb2c4771bcc77528b8fd58eedad6a4f84fdaf9eea4a56a2752391a0c87eee00;
 
@@ -78,8 +79,9 @@ abstract contract BaseForkTest is FhevmTest {
         bytes32[6] erc7984Slots;
         // wrapper: [_underlying+_decimals packed, _rate, _unwrapRequests base].
         bytes32[3] wrapperSlots;
-        // V3: [_blockedUsers base, _unwrapContexts base, _underlyingDenyListSelector + bool].
-        bytes32[3] v3Slots;
+        // V3: [_blockedUsers base, _unwrapContexts base, _underlyingDenyListSelector + bool + _pauser,
+        //      _observers values-array length, _observers positions base].
+        bytes32[5] v3Slots;
         bool hasUnderlyingDenyListSelector;
         bytes4 underlyingDenyListSelector;
         address blockedUser;
@@ -124,10 +126,11 @@ abstract contract BaseForkTest is FhevmTest {
     /// @notice Deploys one fresh implementation from repo HEAD and upgrades every enumerated proxy
     /// onto it, so the whole suite exercises the candidate impl against live mainnet state. Each
     /// proxy's pre-upgrade state is snapshotted first for {UpgradeTest}.
-    /// @dev Empty `upgradeToAndCall` data is correct while HEAD stays at reinitializer(3) and the
-    /// live proxies are already at initialized version 3. When HEAD adds a new reinitializer (V4+),
-    /// pass its encoded call as the `data` argument here.
+    /// @dev HEAD is at reinitializer(4) and the live proxies are at version 3, so the upgrade must
+    /// carry encoded `reinitializeV4` calldata. It seeds no observers, mirroring the calldata a
+    /// production upgrade proposal would carry.
     function _upgradeAllWrappersToLatest() internal {
+        bytes memory reinitData = abi.encodeCall(ConfidentialWrapper.reinitializeV4, (new address[](0)));
         newImplementation = new ConfidentialWrapper();
         for (uint256 i = 0; i < wrappers.length; i++) {
             address w = wrappers[i];
@@ -136,7 +139,7 @@ abstract contract BaseForkTest is FhevmTest {
             _seedPendingUnwrap(w);
             _snapshotPreUpgrade(w);
             vm.prank(_wrapperOwner(w));
-            ConfidentialWrapper(w).upgradeToAndCall(address(newImplementation), "");
+            ConfidentialWrapper(w).upgradeToAndCall(address(newImplementation), reinitData);
         }
     }
 
@@ -204,7 +207,7 @@ abstract contract BaseForkTest is FhevmTest {
         for (uint256 i = 0; i < 3; i++) {
             $.wrapperSlots[i] = vm.load(w, bytes32(uint256(WRAPPER_STORAGE_BASE) + i));
         }
-        for (uint256 i = 0; i < 3; i++) {
+        for (uint256 i = 0; i < 5; i++) {
             $.v3Slots[i] = vm.load(w, bytes32(uint256(CONFIDENTIAL_WRAPPER_V3_STORAGE_BASE) + i));
         }
     }
@@ -232,6 +235,12 @@ abstract contract BaseForkTest is FhevmTest {
 
     function _v3UnwrapContextSlot(bytes32 requestId) internal pure returns (bytes32) {
         return keccak256(abi.encode(requestId, uint256(CONFIDENTIAL_WRAPPER_V3_STORAGE_BASE) + 1));
+    }
+
+    /// @notice Word holding `_underlyingDenyListSelector` (offset 0), `_hasUnderlyingDenyListSelector`
+    /// (offset 4) and `_pauser` (offset 5), which share one packed slot.
+    function _v3PauserSlot() internal pure returns (bytes32) {
+        return bytes32(uint256(CONFIDENTIAL_WRAPPER_V3_STORAGE_BASE) + 2);
     }
 
     /// @notice Returns the explicit blacklist interface for `token`, read from the shared

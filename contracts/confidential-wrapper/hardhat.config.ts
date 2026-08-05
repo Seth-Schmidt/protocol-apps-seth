@@ -106,9 +106,8 @@ const config: HardhatUserConfig = {
     },
   },
   networks: {
-    // Networks are named by chain (tier is a deploy-params grouping, not a Hardhat network). CI
-    // injects one DEPLOYMENT_RPC_URL per environment; local dev uses <NETWORK>_RPC_URL. chainId is
-    // required for the fhevm plugin's verification.
+    // Networks named by chain (tier is a deploy-params grouping, not a Hardhat network).
+    // CI injects DEPLOYMENT_RPC_URL per environment; local uses <NETWORK>_RPC_URL.
     ethereum: {
       url: process.env.DEPLOYMENT_RPC_URL || process.env.ETHEREUM_RPC_URL || '',
       accounts,
@@ -118,6 +117,13 @@ const config: HardhatUserConfig = {
       url: process.env.DEPLOYMENT_RPC_URL || process.env.SEPOLIA_RPC_URL || '',
       accounts,
       chainId: 11155111,
+    },
+    // FHEVM config for chainId 80002 comes from the locally vendored
+    // contracts/fhevm/ZamaConfig.sol (aligned with @fhevm/solidity 0.13.2).
+    'polygon-amoy': {
+      url: process.env.AMOY_RPC_URL || '',
+      accounts,
+      chainId: 80002,
     },
     hardhat: {
       // Need this to avoid deployment issues in test
