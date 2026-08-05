@@ -35,14 +35,18 @@ npm-debug.log*
 # Typechain
 typechain-types/
 
-# Hardhat
-deployments/
+# Hardhat — live-network deployment state is committed; ignore local chains
+deployments/localhost/
+deployments/hardhat/
 
-# OpenZeppelin
-.openzeppelin/
+# OpenZeppelin — live-network manifests are committed; ignore local-chain manifests
+.openzeppelin/unknown-*.json
 
 # Foundry
 broadcast/
 
 # Fhevm
 fhevmTemp/
+
+# Generated deploy report (uploaded as a CI artifact, never committed)
+deploy-log.json

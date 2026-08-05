@@ -48,8 +48,8 @@ describe('ConfidentialWrapper Deployment', function () {
           `CONFIDENTIAL_WRAPPER_HAS_UNDERLYING_DENY_LIST_SELECTOR_${i}`,
         );
 
-        // Get the deployed proxy contract
-        const proxyDeployment = await hre.deployments.get(getConfidentialWrapperProxyName(name));
+        // Get the deployed proxy contract (artifacts are keyed by symbol)
+        const proxyDeployment = await hre.deployments.get(getConfidentialWrapperProxyName(symbol));
         const confidentialWrapper = await hre.ethers.getContractAt(CONTRACT_NAME, proxyDeployment.address);
 
         // Verify the contract was deployed

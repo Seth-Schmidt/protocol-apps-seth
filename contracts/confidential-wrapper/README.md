@@ -14,10 +14,11 @@ Wraps standard ERC20 tokens into confidential ERC7984 tokens using FHE. Deployed
 
 | Variable | Description |
 | --- | --- |
-| `MNEMONIC` or `PRIVATE_KEY` | Authentication for the deployer account |
-| `MAINNET_RPC_URL` | RPC URL for mainnet |
-| `SEPOLIA_RPC_URL` | RPC URL for Sepolia testnet |
-| `ETHERSCAN_API_KEY` | Etherscan API key (required for contract verification) |
+| `MNEMONIC` or `PRIVATE_KEY` | Local signer for the deployer account |
+| `ETHEREUM_RPC_URL` | RPC URL for the `ethereum` network (mainnet) |
+| `SEPOLIA_RPC_URL` | RPC URL for the `sepolia` network (Sepolia testnet) |
+| `DEPLOYMENT_RPC_URL` | Optional. If set, overrides the per-network RPC URL for the active `--network` |
+| `ETHERSCAN_API_KEY` | Etherscan API key (required for Etherscan verification; Blockscout/Sourcify need none) |
 
 ### Task inputs (batch deployment)
 
@@ -29,7 +30,6 @@ Wraps standard ERC20 tokens into confidential ERC7984 tokens using FHE. Deployed
 | `CONFIDENTIAL_WRAPPER_CONTRACT_URI_{i}` | Contract URI metadata for the wrapper at index `i` |
 | `CONFIDENTIAL_WRAPPER_UNDERLYING_ADDRESS_{i}` | Address of the underlying ERC20 token for the wrapper at index `i` |
 | `CONFIDENTIAL_WRAPPER_OWNER_ADDRESS_{i}` | Owner address for the wrapper at index `i` |
-| `CONFIDENTIAL_WRAPPER_INITIAL_OBSERVERS_{i}` | Optional JSON array of observer addresses to seed during initialization |
 
 ### Task inputs (batch deploy upgrade implementations)
 
@@ -57,7 +57,6 @@ Deploy a single confidential wrapper contract.
 | `--blocked-users` | `json` | Yes | JSON array of addresses to seed into the wrapper denylist during `initialize` |
 | `--underlying-deny-list-selector` | `string` | Yes | Function selector used to query the underlying token denylist |
 | `--has-underlying-deny-list-selector` | `boolean` | Yes | Whether the underlying token denylist selector should be enabled |
-| `--initial-observers` | `json` | No | JSON array of observer addresses to seed during `initialize` |
 
 **Example:**
 
@@ -71,8 +70,7 @@ npx hardhat task:deployConfidentialWrapper \
   --blocked-users '[]' \
   --underlying-deny-list-selector 0x00000000 \
   --has-underlying-deny-list-selector false \
-  --initial-observers '[]' \
-  --network testnet
+  --network <network>
 ```
 
 ### `task:deployAllConfidentialWrappers`
@@ -85,28 +83,14 @@ Each wrapper must also provide the V3 initializer configuration:
 | --- | --- |
 | `CONFIDENTIAL_WRAPPER_BLOCKED_USERS_{i}` | JSON array of addresses to seed into the wrapper denylist |
 | `CONFIDENTIAL_WRAPPER_UNDERLYING_DENY_LIST_SELECTOR_{i}` | Function selector used to query the underlying token denylist |
-| `CONFIDENTIAL_WRAPPER_HAS_UNDERLYING_DENY_LIST_SELECTOR_{i}` | Whether the underlying token denylist check is enabled |
-| `CONFIDENTIAL_WRAPPER_INITIAL_OBSERVERS_{i}` | Optional JSON array of observer addresses to seed during initialization |
-
-> **Underlying deny-list configuration:** Only
-> three `(selector, isSet)` pairs are legal; any `(non-zero selector, isSet = false)` reverts at
-> deploy/set time (`NonZeroSelectorRequiresIsSet`):
->
-> | `selector` | `isSet` | Meaning |
-> | --- | --- | --- |
-> | `0x00000000` | `false` | Check disabled |
-> | `0x00000000` | `true` | Check enabled against a zero selector |
-> | non-zero | `true` | Check enabled against that selector |
->
-> Enablement is carried **only** by `isSet`. Consumers of `getUnderlyingDenyListSelector` must read
-> the returned `isSet` bool and never infer enablement from `selector != 0`.
+| `CONFIDENTIAL_WRAPPER_HAS_UNDERLYING_DENY_LIST_SELECTOR_{i}` | Whether the underlying token denylist selector should be enabled |
 
 **Parameters:** None (configuration is read from environment variables).
 
 **Example:**
 
 ```bash
-npx hardhat task:deployAllConfidentialWrappers --network testnet
+npx hardhat task:deployAllConfidentialWrappers --network <network>
 ```
 
 ### `task:verifyConfidentialWrapper`
@@ -124,7 +108,7 @@ Verify a single confidential wrapper contract (both proxy and implementation) on
 ```bash
 npx hardhat task:verifyConfidentialWrapper \
   --proxy-address 0x1234567890123456789012345678901234567890 \
-  --network testnet
+  --network <network>
 ```
 
 ### `task:verifyAllConfidentialWrappers`
@@ -136,7 +120,7 @@ Verify all deployed confidential wrapper contracts on Etherscan. Reads wrapper n
 **Example:**
 
 ```bash
-npx hardhat task:verifyAllConfidentialWrappers --network testnet
+npx hardhat task:verifyAllConfidentialWrappers --network <network>
 ```
 
 ### `task:deployWrapperImplementation`
@@ -153,7 +137,7 @@ Deploy a new `ConfidentialWrapper` implementation contract without upgrading any
 **Example:**
 
 ```bash
-npx hardhat task:deployWrapperImplementation --name "Confidential USDT" --label "v2" --network testnet
+npx hardhat task:deployWrapperImplementation --name "Confidential USDT" --label "v2" --network <network>
 ```
 
 ### `task:deployAllWrapperImplementations`
@@ -167,7 +151,7 @@ Deploy upgrade implementations for all wrappers defined in the `.env` file. Read
 **Example:**
 
 ```bash
-npx hardhat task:deployAllWrapperImplementations --network testnet
+npx hardhat task:deployAllWrapperImplementations --network <network>
 ```
 
 ### `task:verifyWrapperImplementation`
@@ -183,7 +167,7 @@ Verify a single `ConfidentialWrapper` implementation contract on Etherscan.
 **Example:**
 
 ```bash
-npx hardhat task:verifyWrapperImplementation --address 0x1234567890123456789012345678901234567890 --network testnet
+npx hardhat task:verifyWrapperImplementation --address 0x1234567890123456789012345678901234567890 --network <network>
 ```
 
 ### `task:verifyAllWrapperImplementations`
@@ -195,8 +179,12 @@ Verify upgrade implementation contracts for all wrappers on Etherscan. Looks up 
 **Example:**
 
 ```bash
-npx hardhat task:verifyAllWrapperImplementations --network testnet
+npx hardhat task:verifyAllWrapperImplementations --network <network>
 ```
+
+## Params-driven pipeline (CI)
+
+The GitHub Actions workflow deploys from reviewed [`deploy-params/`](./deploy-params/) files rather than raw `.env` inputs. See the [deploy params schema](./deploy-params/SCHEMA.md) and the [deploy runbook](../../docs/deployment/deploy-wrapper-runbook.md) for the full process. The pipeline is built from these tasks:
 
 ## Scripts
 
