@@ -18,7 +18,7 @@ Wraps standard ERC20 tokens into confidential ERC7984 tokens using FHE. Deployed
 | `ETHEREUM_RPC_URL` | RPC URL for the `ethereum` network (mainnet) |
 | `SEPOLIA_RPC_URL` | RPC URL for the `sepolia` network (Sepolia testnet) |
 | `DEPLOYMENT_RPC_URL` | Optional. If set, overrides the per-network RPC URL for the active `--network` |
-| `ETHERSCAN_API_KEY` | Etherscan API key (required for Etherscan verification; Blockscout/Sourcify need none) |
+| `ETHERSCAN_API_KEY` | Etherscan API key (required for Etherscan verification; Blockscout and Sourcify need none) |
 
 ### Task inputs (batch deployment)
 
@@ -30,6 +30,7 @@ Wraps standard ERC20 tokens into confidential ERC7984 tokens using FHE. Deployed
 | `CONFIDENTIAL_WRAPPER_CONTRACT_URI_{i}` | Contract URI metadata for the wrapper at index `i` |
 | `CONFIDENTIAL_WRAPPER_UNDERLYING_ADDRESS_{i}` | Address of the underlying ERC20 token for the wrapper at index `i` |
 | `CONFIDENTIAL_WRAPPER_OWNER_ADDRESS_{i}` | Owner address for the wrapper at index `i` |
+| `CONFIDENTIAL_WRAPPER_INITIAL_OBSERVERS_{i}` | Optional JSON array of observer addresses to seed during initialization |
 
 ### Task inputs (batch deploy upgrade implementations)
 
@@ -75,7 +76,7 @@ npx hardhat task:deployConfidentialWrapper \
   --blocked-users '[]' \
   --underlying-deny-list-selector 0x00000000 \
   --initial-observers '[]' \
-  --network testnet
+  --network sepolia
 ```
 
 ### `task:deployAllConfidentialWrappers`
@@ -187,9 +188,14 @@ Verify upgrade implementation contracts for all wrappers on Etherscan. Looks up 
 npx hardhat task:verifyAllWrapperImplementations --network <network>
 ```
 
-## Params-driven pipeline (CI)
+## Params-driven deployment (CI)
 
-The GitHub Actions workflow deploys from reviewed [`deploy-params/`](./deploy-params/) files rather than raw `.env` inputs. See the [deploy params schema](./deploy-params/SCHEMA.md) and the [deploy runbook](../../docs/deployment/deploy-wrapper-runbook.md) for the full process. The pipeline is built from these tasks:
+Deployments to public networks are not run by hand from this package. They run from a private CI
+workflow that reads the reviewed [`deploy-params/`](./deploy-params/) files and invokes the Hardhat
+tasks documented above. To request a deployment, open a PR that adds or edits a params entry — see
+[`deploy-params/README.md`](./deploy-params/README.md).
+
+The tasks above remain available for local runs against a development network.
 
 ## Scripts
 

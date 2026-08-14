@@ -1,7 +1,7 @@
 # Deploy params schema
 
 Reviewed, source-of-truth inputs for the `contracts-confidential-wrapper-deploy`
-workflow. Full process: [deploy-wrapper-runbook.md](../../../docs/deployment/deploy-wrapper-runbook.md).
+workflow. How to submit a change: [README.md](./README.md).
 
 ## Layout
 

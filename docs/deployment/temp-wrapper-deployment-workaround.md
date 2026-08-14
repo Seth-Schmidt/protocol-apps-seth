@@ -52,12 +52,14 @@ npm install
 npm run compile
 ```
 
-Populate `.env`. V1 only takes the five constructor inputs (no blocked-users or denylist selector):
+Populate `.env`. V1 only takes the five constructor inputs (no blocked-users or denylist selector).
+The pinned V1 commit still uses Hardhat network `mainnet` and `MAINNET_RPC_URL` (not `ethereum` /
+`ETHEREUM_RPC_URL` from later revisions):
 
 ```dotenv
 # Auth
 MNEMONIC=                          # or PRIVATE_KEY=
-ETHEREUM_RPC_URL=
+MAINNET_RPC_URL=
 ETHERSCAN_API_KEY=
 
 NUM_CONFIDENTIAL_WRAPPERS=N
@@ -73,7 +75,7 @@ CONFIDENTIAL_WRAPPER_OWNER_ADDRESS_{i}=
 **Batch (recommended when deploying multiple wrappers):**
 
 ```bash
-npx hardhat task:deployAllConfidentialWrappers --network ethereum
+npx hardhat task:deployAllConfidentialWrappers --network mainnet
 ```
 
 **Single wrapper:**
@@ -85,19 +87,19 @@ npx hardhat task:deployConfidentialWrapper \
   --contract-uri 'data:application/json;utf8,{"name":"Confidential USDT","symbol":"cUSDT","description":"Confidential wrapper of USDT"}' \
   --underlying 0xdAC17F958D2ee523a2206206994597C13D831ec7 \
   --owner 0xB6D69D5F334d8B97B194617B53c6aB62f8681Ef3 \
-  --network ethereum
+  --network mainnet
 ```
 
 Record the proxy address for every wrapper.
 
 ## Step 3 — Verify on Etherscan
 
-This verifies both the proxy and the V1 implementation. See the note in the main runbook's [Verify on Etherscan](./deploy-wrapper-runbook.md#verify-on-etherscan) about duplicate-verification notices when multiple wrappers share an implementation.
+This verifies both the proxy and the V1 implementation. See the note in the main runbook's [Step 3](./deploy-wrapper-runbook.md#step-3--verify-on-etherscan) about duplicate-verification notices when multiple wrappers share an implementation.
 
 **Batch:**
 
 ```bash
-npx hardhat task:verifyAllConfidentialWrappers --network ethereum
+npx hardhat task:verifyAllConfidentialWrappers --network mainnet
 ```
 
 **Single:**
@@ -105,7 +107,7 @@ npx hardhat task:verifyAllConfidentialWrappers --network ethereum
 ```bash
 npx hardhat task:verifyConfidentialWrapper \
   --proxy-address <PROXY_ADDRESS> \
-  --network ethereum
+  --network mainnet
 ```
 
 ## Step 4 — Submit the combined DAO proposal
@@ -139,4 +141,4 @@ See the [Creating Ethereum Proposals](../governance/creating-proposals-ethereum.
 
 ## Step 5 — Update the addresses directory
 
-Same as [Option 1 Step 3](./deploy-wrapper-runbook.md#step-3--record-addresses).
+Same as [Option 1 Step 5](./deploy-wrapper-runbook.md#step-5--update-the-addresses-directory).
