@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause-Clear
-// Ported from https://github.com/OpenZeppelin/openzeppelin-confidential-contracts/blob/f0914b66f9f3766915403587b1ef1432d53054d3/contracts/token/ERC7984/ERC7984.sol
-// (0.3.0 version)
+// Ported from https://github.com/OpenZeppelin/openzeppelin-confidential-contracts/blob/4a4f6c71f58b75e391899b57e42e3b73d288dfe3/contracts/token/ERC7984/ERC7984.sol
+// (0.5.3 version)
 pragma solidity ^0.8.27;
 
 import {FHE, externalEuint64, ebool, euint64} from "@fhevm/solidity/lib/FHE.sol";
@@ -51,9 +51,6 @@ abstract contract ERC7984Upgradeable is Initializable, IERC7984, ERC165Upgradeab
 
     /// @dev The given holder `holder` is not authorized to spend on behalf of `spender`.
     error ERC7984UnauthorizedSpender(address holder, address spender);
-
-    /// @dev The holder `holder` is trying to send tokens but has a balance of 0.
-    error ERC7984ZeroBalance(address holder);
 
     /**
      * @dev The caller `user` does not have access to the encrypted amount `amount`.
@@ -342,9 +339,6 @@ abstract contract ERC7984Upgradeable is Initializable, IERC7984, ERC165Upgradeab
     /**
      * @dev Safely moves up to `amount` from `from` to `to`, or mints/burns if `from`/`to` is the zero address.
      * Emits a {ConfidentialTransfer} event with the successfully transferred amount.
-     *
-     * NOTE: If the `from` account has never received tokens, it will revert with {ERC7984ZeroBalance}
-     * because their balance handle is uninitialized.
      */
     function _update(address from, address to, euint64 amount) internal virtual returns (euint64 transferred) {
         ERC7984Storage storage $ = _getERC7984Storage();
@@ -358,7 +352,6 @@ abstract contract ERC7984Upgradeable is Initializable, IERC7984, ERC165Upgradeab
             $._totalSupply = ptr;
         } else {
             euint64 fromBalance = $._balances[from];
-            require(FHE.isInitialized(fromBalance), ERC7984ZeroBalance(from));
             (success, ptr) = FHESafeMath.tryDecrease(fromBalance, amount);
             FHE.allowThis(ptr);
             FHE.allow(ptr, from);
