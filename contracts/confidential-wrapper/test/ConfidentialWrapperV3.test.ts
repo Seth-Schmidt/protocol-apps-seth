@@ -39,7 +39,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
       it('adds user to denylist and emits UserBlocked', async function () {
         const target = BLOCKED_ADDRESSES[0];
         await expect(wrapper.connect(ownerSigner).blockUser(target)).to.emit(wrapper, 'UserBlocked').withArgs(target);
-        expect(await wrapper.isBlocked(target)).to.be.true;
+        expect(await wrapper.isBlockedOnWrapper(target)).to.be.true;
       });
 
       it('reverts when user is already blocked', async function () {
@@ -64,7 +64,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
         await expect(wrapper.connect(ownerSigner).unblockUser(target))
           .to.emit(wrapper, 'UserUnblocked')
           .withArgs(target);
-        expect(await wrapper.isBlocked(target)).to.be.false;
+        expect(await wrapper.isBlockedOnWrapper(target)).to.be.false;
       });
 
       it('reverts when user is not blocked', async function () {
@@ -82,22 +82,30 @@ describe('ConfidentialWrapperV3 DenyList', function () {
       });
     });
 
-    describe('isBlocked', function () {
+    describe('isBlockedOnWrapper', function () {
       it('returns false for all addresses before any are blocked', async function () {
         for (const addr of BLOCKED_ADDRESSES) {
-          expect(await wrapper.isBlocked(addr)).to.be.false;
+          expect(await wrapper.isBlockedOnWrapper(addr)).to.be.false;
         }
       });
 
       it('blocks and unblocks all five addresses independently', async function () {
         for (const addr of BLOCKED_ADDRESSES) {
           await wrapper.connect(ownerSigner).blockUser(addr);
-          expect(await wrapper.isBlocked(addr)).to.be.true;
+          expect(await wrapper.isBlockedOnWrapper(addr)).to.be.true;
         }
         for (const addr of BLOCKED_ADDRESSES) {
           await wrapper.connect(ownerSigner).unblockUser(addr);
-          expect(await wrapper.isBlocked(addr)).to.be.false;
+          expect(await wrapper.isBlockedOnWrapper(addr)).to.be.false;
         }
+      });
+
+      // with no underlying check configured, the combined view can only reflect this one
+      it('is what isBlocked reports when no underlying check is configured', async function () {
+        const addr = BLOCKED_ADDRESSES[0];
+        expect(await wrapper.isBlocked(addr)).to.be.false;
+        await wrapper.connect(ownerSigner).blockUser(addr);
+        expect(await wrapper.isBlocked(addr)).to.be.true;
       });
     });
   });
@@ -107,9 +115,9 @@ describe('ConfidentialWrapperV3 DenyList', function () {
       const token = await ethers.deployContract('$ERC20Mock', ['Mock', 'MOCK', 6]);
       const seeds = [BLOCKED_ADDRESSES[0], BLOCKED_ADDRESSES[1]];
       const wrapper = await deployV3(token.target as string, '0x00000000', false, seeds);
-      expect(await wrapper.isBlocked(seeds[0])).to.be.true;
-      expect(await wrapper.isBlocked(seeds[1])).to.be.true;
-      expect(await wrapper.isBlocked(BLOCKED_ADDRESSES[2])).to.be.false;
+      expect(await wrapper.isBlockedOnWrapper(seeds[0])).to.be.true;
+      expect(await wrapper.isBlockedOnWrapper(seeds[1])).to.be.true;
+      expect(await wrapper.isBlockedOnWrapper(BLOCKED_ADDRESSES[2])).to.be.false;
     });
 
     it('emits UserBlocked events for seeded addresses during initialize', async function () {
@@ -157,21 +165,21 @@ describe('ConfidentialWrapperV3 DenyList', function () {
       it('reverts via transferFrom when sender is blocked', async function () {
         await wrapper.connect(ownerSigner).blockUser(holder.address);
         await expect(wrapper.connect(holder).wrap(holder.address, ethers.parseUnits('100', 6)))
-          .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+          .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
           .withArgs(holder.address);
       });
 
       it('reverts via transferFrom when recipient is blocked', async function () {
         await wrapper.connect(ownerSigner).blockUser(recipient.address);
         await expect(wrapper.connect(holder).wrap(recipient.address, ethers.parseUnits('100', 6)))
-          .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+          .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
           .withArgs(recipient.address);
       });
 
       it('reverts via ERC-1363 callback when sender is blocked', async function () {
         await wrapper.connect(ownerSigner).blockUser(holder.address);
         await expect(token.connect(holder).transferAndCall(wrapper.target, ethers.parseUnits('100', 6)))
-          .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+          .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
           .withArgs(holder.address);
       });
 
@@ -184,7 +192,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
               'transferAndCall(address,uint256,bytes)'
             ](wrapper.target, ethers.parseUnits('100', 6), ethers.solidityPacked(['address'], [recipient.address])),
         )
-          .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+          .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
           .withArgs(recipient.address);
       });
     });
@@ -199,7 +207,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
           const balance = await wrapper.confidentialBalanceOf(holder.address);
           await wrapper.connect(ownerSigner).blockUser(recipient.address);
           await expect(wrapper.connect(holder).unwrap(holder.address, recipient.address, balance))
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(recipient.address);
         });
 
@@ -207,7 +215,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
           const balance = await wrapper.confidentialBalanceOf(holder.address);
           await wrapper.connect(ownerSigner).blockUser(holder.address);
           await expect(wrapper.connect(holder).unwrap(holder.address, holder.address, balance))
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(holder.address);
         });
 
@@ -221,7 +229,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
           await wrapper.connect(holder).setOperator(operator.address, until);
           await wrapper.connect(ownerSigner).blockUser(operator.address);
           await expect(wrapper.connect(operator).unwrap(holder.address, holder.address, balanceOp))
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(operator.address);
         });
       });
@@ -240,7 +248,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'unwrap(address,address,bytes32,bytes)'
               ](holder.address, recipient.address, encryptedInput.handles[0], encryptedInput.inputProof),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(recipient.address);
         });
 
@@ -257,7 +265,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'unwrap(address,address,bytes32,bytes)'
               ](holder.address, recipient.address, encryptedInput.handles[0], encryptedInput.inputProof),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(holder.address);
         });
 
@@ -276,7 +284,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'unwrap(address,address,bytes32,bytes)'
               ](holder.address, holder.address, encryptedInput.handles[0], encryptedInput.inputProof),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(operator.address);
         });
       });
@@ -296,13 +304,13 @@ describe('ConfidentialWrapperV3 DenyList', function () {
       it('reverts when requester becomes blocked between unwrap and finalization', async function () {
         await wrapper.connect(ownerSigner).blockUser(holder.address);
         await expect(wrapper.connect(holder).finalizeUnwrap(unwrapRequestId, 0, '0x'))
-          .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+          .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
           .withArgs(holder.address);
       });
     });
 
     describe('finalizeUnwrap (blocked from/operator between unwrap and finalize)', function () {
-      it('reverts with BlockedUser(holder) when `from != to` and holder is blocked after unwrap', async function () {
+      it('reverts with WrapperBlockedAddress(holder) when `from != to` and holder is blocked after unwrap', async function () {
         await wrapper.connect(holder).wrap(holder.address, ethers.parseUnits('100', 6));
         const balance = await wrapper.confidentialBalanceOf(holder.address);
         await wrapper.connect(holder).unwrap(holder.address, recipient.address, balance);
@@ -312,11 +320,11 @@ describe('ConfidentialWrapperV3 DenyList', function () {
         await wrapper.connect(ownerSigner).blockUser(holder.address);
 
         await expect(wrapper.connect(recipient).finalizeUnwrap(unwrapRequestId, 0, '0x'))
-          .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+          .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
           .withArgs(holder.address);
       });
 
-      it('reverts with BlockedUser(recipient) when `from != to` and recipient is blocked after unwrap', async function () {
+      it('reverts with WrapperBlockedAddress(recipient) when `from != to` and recipient is blocked after unwrap', async function () {
         await wrapper.connect(holder).wrap(holder.address, ethers.parseUnits('100', 6));
         const balance = await wrapper.confidentialBalanceOf(holder.address);
         await wrapper.connect(holder).unwrap(holder.address, recipient.address, balance);
@@ -326,11 +334,11 @@ describe('ConfidentialWrapperV3 DenyList', function () {
         await wrapper.connect(ownerSigner).blockUser(recipient.address);
 
         await expect(wrapper.connect(holder).finalizeUnwrap(unwrapRequestId, 0, '0x'))
-          .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+          .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
           .withArgs(recipient.address);
       });
 
-      it('reverts with BlockedUser(operator) when an operator-initiated unwrap is finalized after the operator is blocked', async function () {
+      it('reverts with WrapperBlockedAddress(operator) when an operator-initiated unwrap is finalized after the operator is blocked', async function () {
         await wrapper.connect(holder).wrap(holder.address, ethers.parseUnits('100', 6));
         const until = BigInt(Math.floor(Date.now() / 1000) + 3600);
         await wrapper.connect(holder).setOperator(operator.address, until);
@@ -350,7 +358,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
         await wrapper.connect(ownerSigner).blockUser(operator.address);
 
         await expect(wrapper.connect(recipient).finalizeUnwrap(unwrapRequestId, 0, '0x'))
-          .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+          .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
           .withArgs(operator.address);
       });
 
@@ -400,7 +408,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'confidentialTransfer(address,bytes32,bytes)'
               ](recipient.address, encryptedInput.handles[0], encryptedInput.inputProof),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(holder.address);
         });
 
@@ -417,7 +425,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'confidentialTransfer(address,bytes32,bytes)'
               ](recipient.address, encryptedInput.handles[0], encryptedInput.inputProof),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(recipient.address);
         });
       });
@@ -427,7 +435,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
           const balance = await wrapper.confidentialBalanceOf(holder.address);
           await wrapper.connect(ownerSigner).blockUser(holder.address);
           await expect(wrapper.connect(holder)['confidentialTransfer(address,bytes32)'](recipient.address, balance))
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(holder.address);
         });
 
@@ -435,7 +443,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
           const balance = await wrapper.confidentialBalanceOf(holder.address);
           await wrapper.connect(ownerSigner).blockUser(recipient.address);
           await expect(wrapper.connect(holder)['confidentialTransfer(address,bytes32)'](recipient.address, balance))
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(recipient.address);
         });
       });
@@ -465,7 +473,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'confidentialTransferFrom(address,address,bytes32,bytes)'
               ](holder.address, recipient.address, encryptedInput.handles[0], encryptedInput.inputProof),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(operator.address);
         });
 
@@ -482,7 +490,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'confidentialTransferFrom(address,address,bytes32,bytes)'
               ](holder.address, recipient.address, encryptedInput.handles[0], encryptedInput.inputProof),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(holder.address);
         });
 
@@ -499,7 +507,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'confidentialTransferFrom(address,address,bytes32,bytes)'
               ](holder.address, recipient.address, encryptedInput.handles[0], encryptedInput.inputProof),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(recipient.address);
         });
       });
@@ -513,7 +521,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
               .connect(operator)
               ['confidentialTransferFrom(address,address,bytes32)'](holder.address, recipient.address, balance),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(operator.address);
         });
 
@@ -525,7 +533,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
               .connect(operator)
               ['confidentialTransferFrom(address,address,bytes32)'](holder.address, recipient.address, balance),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(holder.address);
         });
 
@@ -537,7 +545,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
               .connect(operator)
               ['confidentialTransferFrom(address,address,bytes32)'](holder.address, recipient.address, balance),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(recipient.address);
         });
       });
@@ -562,7 +570,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'confidentialTransferAndCall(address,bytes32,bytes,bytes)'
               ](recipient.address, encryptedInput.handles[0], encryptedInput.inputProof, '0x'),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(holder.address);
         });
 
@@ -579,7 +587,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'confidentialTransferAndCall(address,bytes32,bytes,bytes)'
               ](recipient.address, encryptedInput.handles[0], encryptedInput.inputProof, '0x'),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(recipient.address);
         });
       });
@@ -593,7 +601,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
               .connect(holder)
               ['confidentialTransferAndCall(address,bytes32,bytes)'](recipient.address, balance, '0x'),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(holder.address);
         });
 
@@ -605,7 +613,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
               .connect(holder)
               ['confidentialTransferAndCall(address,bytes32,bytes)'](recipient.address, balance, '0x'),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(recipient.address);
         });
       });
@@ -635,7 +643,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'confidentialTransferFromAndCall(address,address,bytes32,bytes,bytes)'
               ](holder.address, recipient.address, encryptedInput.handles[0], encryptedInput.inputProof, '0x'),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(operator.address);
         });
 
@@ -652,7 +660,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'confidentialTransferFromAndCall(address,address,bytes32,bytes,bytes)'
               ](holder.address, recipient.address, encryptedInput.handles[0], encryptedInput.inputProof, '0x'),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(holder.address);
         });
 
@@ -669,7 +677,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'confidentialTransferFromAndCall(address,address,bytes32,bytes,bytes)'
               ](holder.address, recipient.address, encryptedInput.handles[0], encryptedInput.inputProof, '0x'),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(recipient.address);
         });
       });
@@ -685,7 +693,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'confidentialTransferFromAndCall(address,address,bytes32,bytes)'
               ](holder.address, recipient.address, balance, '0x'),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(operator.address);
         });
 
@@ -699,7 +707,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'confidentialTransferFromAndCall(address,address,bytes32,bytes)'
               ](holder.address, recipient.address, balance, '0x'),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(holder.address);
         });
 
@@ -713,7 +721,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
                 'confidentialTransferFromAndCall(address,address,bytes32,bytes)'
               ](holder.address, recipient.address, balance, '0x'),
           )
-            .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+            .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
             .withArgs(recipient.address);
         });
       });
@@ -913,7 +921,7 @@ describe('ConfidentialWrapperV3 DenyList', function () {
   });
 
   describe('Underlying DenyList — local block list checked before underlying', function () {
-    it('reverts with BlockedUser (not UnderlyingDenyListedAddress) when user is on both lists', async function () {
+    it('reverts with WrapperBlockedAddress (not UnderlyingDenyListedAddress) when user is on both lists', async function () {
       const [holder] = await ethers.getSigners();
       const ownerSigner = await ethers.getSigner(owner);
       const token: any = await ethers.deployContract('ERC20MockCUSDC');
@@ -923,7 +931,197 @@ describe('ConfidentialWrapperV3 DenyList', function () {
       await wrapper.connect(ownerSigner).blockUser(holder.address);
       await token.setDenyListed(holder.address, true);
       await expect(wrapper.connect(holder).wrap(holder.address, ethers.parseUnits('100', 6)))
-        .to.be.revertedWithCustomError(wrapper, 'BlockedUser')
+        .to.be.revertedWithCustomError(wrapper, 'WrapperBlockedAddress')
+        .withArgs(holder.address);
+    });
+  });
+
+  // ─── isBlockedOnUnderlying view ──────────────────────────────────────────
+
+  // The blocks above assert on wrap, i.e. on enforcement. These assert on the view itself:
+  // the branches it can take before the staticcall, and the fact that it propagates the
+  // staticcall failures rather than flattening them to false.
+  describe('isBlockedOnUnderlying', function () {
+    let holder: HardhatEthersSigner;
+    let ownerSigner: HardhatEthersSigner;
+
+    beforeEach(async function () {
+      [holder] = await ethers.getSigners();
+      ownerSigner = await ethers.getSigner(owner);
+    });
+
+    it('agrees with wrap for an address denied only by the underlying', async function () {
+      const token: any = await ethers.deployContract('ERC20MockCUSDC');
+      const wrapper = await deployV3(token.target as string, SELECTOR_CUSDC, true);
+      await token.mint(holder.address, ethers.parseUnits('100', 6));
+      await token.connect(holder).approve(wrapper.target, ethers.MaxUint256);
+
+      expect(await wrapper.isBlockedOnUnderlying(holder.address)).to.be.false;
+
+      await token.setDenyListed(holder.address, true);
+
+      // the false negative this view exists to close: clear on the wrapper list, still rejected.
+      // the wrap assertion duplicates the cUSDC block above on purpose — agreement between the
+      // view and enforcement is what is under test, so it has to be observed in one place.
+      expect(await wrapper.isBlockedOnWrapper(holder.address)).to.be.false;
+      expect(await wrapper.isBlockedOnUnderlying(holder.address)).to.be.true;
+      await expect(wrapper.connect(holder).wrap(holder.address, ethers.parseUnits('100', 6)))
+        .to.be.revertedWithCustomError(wrapper, 'UnderlyingDenyListedAddress')
+        .withArgs(holder.address);
+    });
+
+    it('is independent of the wrapper-local denylist', async function () {
+      const token: any = await ethers.deployContract('ERC20MockCUSDC');
+      const wrapper = await deployV3(token.target as string, SELECTOR_CUSDC, true);
+      await wrapper.connect(ownerSigner).blockUser(holder.address);
+
+      expect(await wrapper.isBlockedOnWrapper(holder.address)).to.be.true;
+      expect(await wrapper.isBlockedOnUnderlying(holder.address)).to.be.false;
+    });
+
+    it('returns false when the underlying check is disabled', async function () {
+      const token: any = await ethers.deployContract('ERC20MockCUSDC');
+      const wrapper = await deployV3(token.target as string, '0x00000000', false);
+      await token.setDenyListed(holder.address, true);
+
+      expect(await wrapper.isBlockedOnUnderlying(holder.address)).to.be.false;
+    });
+
+    it('returns false for the zero address, matching the mint and burn exemption', async function () {
+      const token: any = await ethers.deployContract('ERC20MockCUSDC');
+      const wrapper = await deployV3(token.target as string, SELECTOR_CUSDC, true);
+
+      expect(await wrapper.isBlockedOnUnderlying(ethers.ZeroAddress)).to.be.false;
+    });
+
+    it('tracks a selector change made through setUnderlyingDenyListSelector', async function () {
+      const token: any = await ethers.deployContract('ERC20MockCUSDT');
+      const wrapper = await deployV3(token.target as string, '0x00000000', false);
+      await token.setDenyListed(holder.address, true);
+
+      expect(await wrapper.isBlockedOnUnderlying(holder.address)).to.be.false;
+
+      await wrapper.connect(ownerSigner).setUnderlyingDenyListSelector(true, SELECTOR_CUSDT);
+      expect(await wrapper.isBlockedOnUnderlying(holder.address)).to.be.true;
+    });
+
+    it('reverts with UnderlyingDenyListCallFailed when the underlying call reverts', async function () {
+      const token: any = await ethers.deployContract('ERC20MockRevertingDenyList');
+      const wrapper = await deployV3(token.target as string, SELECTOR_CUSDC, true);
+
+      await expect(wrapper.isBlockedOnUnderlying(holder.address)).to.be.revertedWithCustomError(
+        wrapper,
+        'UnderlyingDenyListCallFailed',
+      );
+    });
+
+    it('reverts with InvalidUnderlyingDenyListResponse when the underlying returns wrong-length data', async function () {
+      const token: any = await ethers.deployContract('ERC20MockInvalidDenyList');
+      const wrapper = await deployV3(token.target as string, SELECTOR_CUSDC, true);
+
+      await expect(wrapper.isBlockedOnUnderlying(holder.address)).to.be.revertedWithCustomError(
+        wrapper,
+        'InvalidUnderlyingDenyListResponse',
+      );
+    });
+  });
+
+  // ─── isBlocked (combined) view ───────────────────────────────────────────
+
+  describe('isBlocked', function () {
+    let holder: HardhatEthersSigner;
+    let ownerSigner: HardhatEthersSigner;
+
+    beforeEach(async function () {
+      [holder] = await ethers.getSigners();
+      ownerSigner = await ethers.getSigner(owner);
+    });
+
+    it('returns false when neither source denies the address', async function () {
+      const token: any = await ethers.deployContract('ERC20MockCUSDC');
+      const wrapper = await deployV3(token.target as string, SELECTOR_CUSDC, true);
+
+      expect(await wrapper.isBlocked(holder.address)).to.be.false;
+    });
+
+    it('returns true when only the wrapper-local denylist denies the address', async function () {
+      const token: any = await ethers.deployContract('ERC20MockCUSDC');
+      const wrapper = await deployV3(token.target as string, SELECTOR_CUSDC, true);
+      await wrapper.connect(ownerSigner).blockUser(holder.address);
+
+      expect(await wrapper.isBlockedOnWrapper(holder.address)).to.be.true;
+      expect(await wrapper.isBlockedOnUnderlying(holder.address)).to.be.false;
+      expect(await wrapper.isBlocked(holder.address)).to.be.true;
+    });
+
+    it('returns true when only the underlying denies the address', async function () {
+      const token: any = await ethers.deployContract('ERC20MockCUSDC');
+      const wrapper = await deployV3(token.target as string, SELECTOR_CUSDC, true);
+      await token.setDenyListed(holder.address, true);
+
+      expect(await wrapper.isBlockedOnWrapper(holder.address)).to.be.false;
+      expect(await wrapper.isBlockedOnUnderlying(holder.address)).to.be.true;
+      expect(await wrapper.isBlocked(holder.address)).to.be.true;
+    });
+
+    it('returns true when both sources deny the address', async function () {
+      const token: any = await ethers.deployContract('ERC20MockCUSDC');
+      const wrapper = await deployV3(token.target as string, SELECTOR_CUSDC, true);
+      await wrapper.connect(ownerSigner).blockUser(holder.address);
+      await token.setDenyListed(holder.address, true);
+
+      expect(await wrapper.isBlocked(holder.address)).to.be.true;
+    });
+
+    it('ignores the underlying source when the check is disabled', async function () {
+      const token: any = await ethers.deployContract('ERC20MockCUSDC');
+      const wrapper = await deployV3(token.target as string, '0x00000000', false);
+      await token.setDenyListed(holder.address, true);
+
+      expect(await wrapper.isBlocked(holder.address)).to.be.false;
+
+      await wrapper.connect(ownerSigner).setUnderlyingDenyListSelector(true, SELECTOR_CUSDC);
+      expect(await wrapper.isBlocked(holder.address)).to.be.true;
+    });
+
+    it('returns false for the zero address, matching the mint and burn exemption', async function () {
+      const token: any = await ethers.deployContract('ERC20MockCUSDC');
+      const wrapper = await deployV3(token.target as string, SELECTOR_CUSDC, true);
+      await token.setDenyListed(ethers.ZeroAddress, true);
+
+      expect(await wrapper.isBlocked(ethers.ZeroAddress)).to.be.false;
+    });
+
+    it('reverts with UnderlyingDenyListCallFailed when the underlying call reverts', async function () {
+      const token: any = await ethers.deployContract('ERC20MockRevertingDenyList');
+      const wrapper = await deployV3(token.target as string, SELECTOR_CUSDC, true);
+
+      await expect(wrapper.isBlocked(holder.address)).to.be.revertedWithCustomError(
+        wrapper,
+        'UnderlyingDenyListCallFailed',
+      );
+    });
+
+    it('short-circuits the underlying call when the wrapper-local denylist already denies', async function () {
+      const token: any = await ethers.deployContract('ERC20MockRevertingDenyList');
+      const wrapper = await deployV3(token.target as string, SELECTOR_CUSDC, true);
+      await wrapper.connect(ownerSigner).blockUser(holder.address);
+
+      // the underlying mock getter reverts for every address, so a true result here can only come
+      // from the local list being consulted first
+      expect(await wrapper.isBlocked(holder.address)).to.be.true;
+    });
+
+    it('agrees with enforcement for an address denied only by the underlying', async function () {
+      const token: any = await ethers.deployContract('ERC20MockCUSDC');
+      const wrapper = await deployV3(token.target as string, SELECTOR_CUSDC, true);
+      await token.mint(holder.address, ethers.parseUnits('100', 6));
+      await token.connect(holder).approve(wrapper.target, ethers.MaxUint256);
+      await token.setDenyListed(holder.address, true);
+
+      expect(await wrapper.isBlocked(holder.address)).to.be.true;
+      await expect(wrapper.connect(holder).wrap(holder.address, ethers.parseUnits('100', 6)))
+        .to.be.revertedWithCustomError(wrapper, 'UnderlyingDenyListedAddress')
         .withArgs(holder.address);
     });
   });

@@ -65,8 +65,8 @@ contract ConfidentialWrapper is
     /// @dev Emitted when the underlying deny-list selector configuration is updated.
     event UnderlyingDenyListSelectorUpdated(bytes4 indexed selector, bool isSet);
 
-    /// @dev Thrown when `user` is on the denylist and attempts a restricted operation.
-    error BlockedUser(address user);
+    /// @dev Thrown when `user` is on the wrapper-local denylist and attempts a restricted operation.
+    error WrapperBlockedAddress(address user);
 
     /// @dev Thrown when attempting to block a user that is already on the denylist.
     error UserAlreadyBlocked(address user);
@@ -225,9 +225,43 @@ contract ConfidentialWrapper is
         _unblockUser(user);
     }
 
-    /// @dev Returns whether `user` is currently on the denylist.
+    /**
+     * @dev Returns whether `user` is denied by either denylist, i.e. the predicate
+     * {_requireNotBlocked} enforces. This is the check integrators should use.
+     */
     function isBlocked(address user) public view virtual returns (bool) {
+        if (user == address(0)) return false;
+        return isBlockedOnWrapper(user) || isBlockedOnUnderlying(user);
+    }
+
+    /**
+     * @dev Returns whether `user` is on the wrapper-local denylist, the source the owner
+     * controls through {blockUser} and {unblockUser}.
+     */
+    function isBlockedOnWrapper(address user) public view virtual returns (bool) {
         return _getConfidentialWrapperV3Storage()._blockedUsers[user];
+    }
+
+    /**
+     * @dev Returns whether `user` is denied by the underlying token.
+     * Returns `false` when the check is disabled or when `user` is `address(0)`,
+     * which is exempt so mints and burns stay possible.
+     */
+    function isBlockedOnUnderlying(address user) public view virtual returns (bool) {
+        if (user == address(0)) return false;
+        return _isBlockedOnUnderlying(user);
+    }
+
+    /// @dev Returns whether `user` is denied by the underlying token; callers handle the zero-address exemption.
+    function _isBlockedOnUnderlying(address user) internal view virtual returns (bool) {
+        ConfidentialWrapperV3Storage storage $ = _getConfidentialWrapperV3Storage();
+        if (!$._hasUnderlyingDenyListSelector) return false;
+        (bool success, bytes memory data) = underlying().staticcall(
+            abi.encodeWithSelector($._underlyingDenyListSelector, user)
+        );
+        if (!success) revert UnderlyingDenyListCallFailed();
+        if (data.length != 32) revert InvalidUnderlyingDenyListResponse();
+        return abi.decode(data, (bool));
     }
 
     /**
@@ -376,20 +410,12 @@ contract ConfidentialWrapper is
         }
     }
 
+    /// @dev The enforced predicate, combining the wrapper-local and underlying denylist checks.
     function _requireNotBlocked(address user) internal view {
         // to not block mints and burns, also needed because for e.g. USDT.getBlackListStatus(address(0))
         if (user == address(0)) return;
-        require(!isBlocked(user), BlockedUser(user));
-        ConfidentialWrapperV3Storage storage $ = _getConfidentialWrapperV3Storage();
-        if ($._hasUnderlyingDenyListSelector) {
-            (bool success, bytes memory data) = underlying().staticcall(
-                abi.encodeWithSelector($._underlyingDenyListSelector, user)
-            );
-            if (!success) revert UnderlyingDenyListCallFailed();
-            if (data.length != 32) revert InvalidUnderlyingDenyListResponse();
-            bool value = abi.decode(data, (bool));
-            if (value == true) revert UnderlyingDenyListedAddress(user);
-        }
+        require(!isBlockedOnWrapper(user), WrapperBlockedAddress(user));
+        require(!isBlockedOnUnderlying(user), UnderlyingDenyListedAddress(user));
     }
 
     // ----- Overrides enforcing the denylist and the pause -----

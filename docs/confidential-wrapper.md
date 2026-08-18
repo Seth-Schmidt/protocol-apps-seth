@@ -11,6 +11,7 @@ This document gives an overview of the **Confidential Wrapper,** a smart contrac
 * **Rate**: The conversion ratio between underlying token units and confidential token units (due to decimal differences).
 * **Operator**: An address authorized to transfer confidential tokens on behalf of another address.
 * **Observer**: An address authorized by the wrapper owner to decrypt the wrapper's encrypted amounts on its behalf. See [Observers](#observers).
+* **Denylist**: The set of addresses barred from wrapping, unwrapping, and transferring. See [Denylist](#denylist).
 * **Owner**: The owner of the wrapper contract. In the FHEVM protocol, this is initially set to the Protocol DAO governance (see [governance.md](governance.md)). Ownership will then be transferred to the underlying token's owner.
 * **Registry**: The registry contract that maps ERC-20 tokens to their corresponding confidential wrappers. More information [here](wrapper-registry.md).
 * **ACL**: The Access Control List (ACL) contract that manages the permissions for encrypted amounts. More information in the [FHEVM library documentation](https://docs.zama.org/protocol/protocol/overview/library#access-control).
@@ -328,6 +329,62 @@ bool isAuthorized = wrapper.isOperator(holder, spender);
 For moving tokens into a contract that reacts to the transfer, prefer `confidentialTransferAndCall` (see [Transfer with callback](#transfer-with-callback)) over the operator pattern: it delivers the tokens and notifies the recipient in a single transaction without a standing operator allowance.
 {% endhint %}
 
+### Denylist
+
+The wrapper refuses to move tokens for a denied address. Two independent sources are consulted, and three view functions expose them: one per source, plus a combined check.
+
+| View function | Answers |
+| --- | --- |
+| `isBlocked(user)` | Is `user` able to wrap, unwrap or confidentially transfer? |
+| `isBlockedOnWrapper(user)` | Is `user` able to wrap, unwrap or confidentially transfer, because it is on the **wrapper's own denylist**? |
+| `isBlockedOnUnderlying(user)` | Is `user` able to wrap, unwrap or confidentially transfer, because it is denied by the **underlying token**? |
+
+```solidity
+// The general case: can this address transact with the wrapper at all?
+bool blocked = wrapper.isBlocked(user);
+
+// Denied by the wrapper itself
+bool blockedOnWrapper = wrapper.isBlockedOnWrapper(user);
+
+// Denied by the underlying token (e.g. USDT's `getBlackListStatus`)
+bool blockedOnUnderlying = wrapper.isBlockedOnUnderlying(user);
+```
+
+#### `isBlocked`
+
+Returns `true` if either source denies `user`, i.e. `isBlockedOnWrapper(user) || isBlockedOnUnderlying(user)`. The wrapper-local list is consulted first, so an address already denied there is reported without any call to the underlying token.
+
+#### `isBlockedOnWrapper`
+
+Reads the wrapper-local denylist only. It is a plain storage read: it never calls the underlying token and never reverts.
+
+#### `isBlockedOnUnderlying`
+
+Forwards the query to the underlying token using the configured deny-list selector, and returns `false` when:
+
+* the underlying deny-list check is disabled, or
+* `user` is the zero address, which is exempt so that mints and burns remain possible.
+
+Whether the check is enabled, and which selector is used, can be read with:
+
+```solidity
+wrapper.getUnderlyingDenyListSelector();
+```
+
+Only the owner can change this configuration, via `setUnderlyingDenyListSelector`.
+
+{% hint style="warning" %}
+### **`isBlocked` and `isBlockedOnUnderlying` can revert**
+
+Unlike `isBlockedOnWrapper`, these perform a `staticcall` on the underlying token when the check is enabled. They revert with `UnderlyingDenyListCallFailed` if that call fails, and with `InvalidUnderlyingDenyListResponse` if the returned data is not a 32-byte value. Callers that treat them as infallible views should handle these cases. Note that the same failure would also make a wrap, transfer, or unwrap revert, so a reverting view reflects a genuinely unusable configuration rather than a quirk of the view.
+{% endhint %}
+
+#### Enforcement
+
+Both sources are enforced together on every path that moves tokens: `wrap`, the ERC-1363 `onTransferReceived` callback, confidential transfers, `unwrap`, and `finalizeUnwrap`. The checked parties include the sender, the recipient, and the operator when a transfer is made on behalf of another address. `finalizeUnwrap` re-checks the holder, the operator, and the receiver from the original `unwrap` request, so an address that becomes denied between the two steps cannot complete its unwrap.
+
+A denied address causes the operation to revert with `WrapperBlockedAddress(user)` when it is on the wrapper-local denylist, or `UnderlyingDenyListedAddress(user)` when it is denied by the underlying token.
+
 ### Observers
 
 An **observer** is an address that the wrapper owner authorizes to decrypt encrypted amounts on behalf of the wrapper contract. This can be used to meet a reporting or compliance obligation, for example.
@@ -470,6 +527,10 @@ Transfer functions with `euint64` (not `externalEuint64`) require the caller to 
 | `ERC7984UnauthorizedCaller(caller)`                     | Invalid caller for operation               |
 | `InvalidUnwrapRequest(unwrapRequestId)`                 | Finalizing non-existent unwrap request     |
 | `ERC7984TotalSupplyOverflow()`                          | Minting would exceed uint64 max            |
+| `WrapperBlockedAddress(user)`                           | Address is on the wrapper-local denylist   |
+| `UnderlyingDenyListedAddress(user)`                     | Address is denied by the underlying token  |
+| `UnderlyingDenyListCallFailed()`                        | The deny-list `staticcall` on the underlying token failed |
+| `InvalidUnderlyingDenyListResponse()`                   | The underlying deny-list call did not return a 32-byte value |
 | `InvalidObserver(observer)`                             | Observer is the zero address, the wrapper itself, or `WILDCARD_CONTRACT` |
 | `ObserverAlreadyConfigured(observer)`                   | Adding an address that is already an observer |
 
