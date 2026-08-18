@@ -32,6 +32,13 @@ Wraps standard ERC20 tokens into confidential ERC7984 tokens using FHE. Deployed
 | `CONFIDENTIAL_WRAPPER_OWNER_ADDRESS_{i}` | Owner address for the wrapper at index `i` |
 | `CONFIDENTIAL_WRAPPER_INITIAL_OBSERVERS_{i}` | Optional JSON array of observer addresses to seed during initialization |
 
+### Task inputs (upgrade implementation)
+
+| Variable | Description |
+| --- | --- |
+| `CONFIDENTIAL_WRAPPER_UPGRADE_NAME` | Optional wrapper identifier included in the artifact (e.g. `cUSDT`). Used by `task:deployConfidentialWrapperImpl` when `--name` is omitted. Omit for a shared implementation |
+| `CONFIDENTIAL_WRAPPER_UPGRADE_VERSION_LABEL` | Version label appended to the saved implementation artifact (e.g. `v4`). Used by `task:deployConfidentialWrapperImpl` when `--label` is omitted |
+
 > **Underlying deny-list configuration:** the selector alone carries enablement.
 > Consumers of `getUnderlyingDenyListSelector` determine enablement with `selector != 0`. A deny-list
 > getter whose selector is genuinely `0x00000000` can exist in theory but is indistinguishable from
@@ -123,18 +130,33 @@ npx hardhat task:verifyAllConfidentialWrappers --network <network>
 
 ### `task:deployConfidentialWrapperImpl`
 
-Deploy a new `ConfidentialWrapper` implementation contract without upgrading any proxy. The proxy upgrade is handled separately by the DAO. The artifact is saved as `ConfidentialWrapper_<label>_Impl`.
+Deploy a new `ConfidentialWrapper` implementation contract without upgrading any proxy. The proxy upgrade is handled separately by the DAO.
+
+The artifact is `ConfidentialWrapper_<label>_Impl`, or `ConfidentialWrapper_<name>_<label>_Impl` when a name is provided.
 
 **Parameters:**
 
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
-| `--label` | `string` | Yes | Version label appended to the saved artifact name (e.g. `"v4"`) |
+| `--name` | `string` | No | Wrapper identifier in the artifact (e.g. `"cUSDT"`). |
+| `--label` | `string` | No | Version label appended to the saved artifact name (e.g. `"v4"`). Defaults to `CONFIDENTIAL_WRAPPER_UPGRADE_VERSION_LABEL` |
 
 **Example:**
 
 ```bash
+npx hardhat task:deployConfidentialWrapperImpl --name cUSDT --label v4 --network <network>
+```
+
+Shared implementation (no per-wrapper name):
+
+```bash
 npx hardhat task:deployConfidentialWrapperImpl --label v4 --network <network>
+```
+
+Or, with `CONFIDENTIAL_WRAPPER_UPGRADE_VERSION_LABEL` (and optionally `CONFIDENTIAL_WRAPPER_UPGRADE_NAME`) set in `.env`:
+
+```bash
+npx hardhat task:deployConfidentialWrapperImpl --network <network>
 ```
 
 ### `task:verifyConfidentialWrapperImpl`
