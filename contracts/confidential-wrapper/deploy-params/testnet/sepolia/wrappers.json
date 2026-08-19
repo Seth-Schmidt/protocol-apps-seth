@@ -50,7 +50,6 @@
   "cmTEST": {
     "underlying": "0x10513c06D40D1D2Ce410570DfADA40D5b3968B3b",
     "blockedUsers": [],
-    "underlyingDenyListSelector": "0x00000000",
-    "hasUnderlyingDenyList": true
+    "underlyingDenyListSelector": "0x00000000"
   }
 }
