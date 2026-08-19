@@ -47,11 +47,6 @@
     "blockedUsers": [],
     "underlyingDenyListSelector": "0x97f735d5"
   },
-  "cmTEST": {
-    "underlying": "0x10513c06D40D1D2Ce410570DfADA40D5b3968B3b",
-    "blockedUsers": [],
-    "underlyingDenyListSelector": "0x00000000"
-  },
   "cmTEST2": {
     "underlying": "0x10513c06D40D1D2Ce410570DfADA40D5b3968B3b",
     "blockedUsers": [],
