@@ -4,6 +4,10 @@
     {
       "address": "0xCF7cbc15f8f05a00eA2d908e0c4807D4A623c620",
       "kind": "uups"
+    },
+    {
+      "address": "0x3ADe81B776feA90B121887A6a832b82e892b8a0a",
+      "kind": "uups"
     }
   ],
   "impls": {
@@ -490,7 +494,10 @@
             }
           ]
         }
-      }
+      },
+      "allAddresses": [
+        "0xD7C891b2EbaBfa7a2e4869EE906c4B826b81244B"
+      ]
     }
   }
 }
