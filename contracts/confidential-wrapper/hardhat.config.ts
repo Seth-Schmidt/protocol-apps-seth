@@ -66,9 +66,23 @@ subtask(TASK_TEST_GET_TEST_FILES).setAction(async (args, _hre, runSuper) => {
 
 const config: HardhatUserConfig = {
   solidity: {
+    // Hardhat picks the highest compiler matching a pragma, so listing 0.8.29 for
+    // hardhat-verify (OZ's precompiled ERC1967Proxy is 0.8.29) would also bump our
+    // ^0.8.27 impls. Pin ConfidentialWrapper via overrides; keep 0.8.29 in compilers
+    // so verify can match the proxy bytecode without CompilerVersionsMismatchError.
     compilers: [
       {
         version: '0.8.27',
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 800,
+          },
+          evmVersion: 'cancun',
+        },
+      },
+      {
+        version: '0.8.29',
         settings: {
           optimizer: {
             enabled: true,
